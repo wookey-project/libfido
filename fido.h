@@ -21,23 +21,16 @@
  * Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  *
  */
+#ifndef FIDO_H_
+#define FIDO_H_
 
-#ifndef LIBFIDO_H_
-#define LIBFIDO_H_
+#include "libc/stdio.h"
 
-#include "autoconf.h"
-#include "libc/types.h"
+#if CONFIG_USR_LIB_FIDO_DEBUG
+# define log_printf(...) printf(__VA_ARGS__)
+#else
+# define log_printf(...)
+#endif
 
-mbed_error_t fido_declare(uint8_t usbxdci_handler);
 
-mbed_error_t fido_configure(void);
-
-/* to be executed once. This set OUT EP in DATA mode, ready to receive, for the fist time.
- * Other successive cases will be handled by fido_exec()
- * XXX: a cleaner way would be to implement an automaton with a state in the context,
- * separating an INIT mode from a RUNNING mode */
-mbed_error_t fido_prepare_exec(void);
-
-mbed_error_t fido_exec(void);
-
-#endif/*!LIBFIDO_H_*/
+#endif /*!FIDO_H_*/

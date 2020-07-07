@@ -1,4 +1,3 @@
-
 /*
  * TODO:
  * FIDO U2F is using APDU (ISO7816-4 framing).
@@ -7,7 +6,6 @@
  *
  * [ FIDO U2F CMD  ][   FIDO Ctrl         ]   <---- this library
  *  ---------------
- * [ libISO7816    ]
  * [ (APDU framing)]
  *  ---------------  ---------------------
  * [  libUSBHID    ][ libxDCI             ]
@@ -15,6 +13,8 @@
  *  ---------------  ---------------------
  * [  USB backend driver                  ]
  */
+#include "autoconf.h"
+#include "libc/types.h"
 
 /*
  * FIXME to define properly:
@@ -27,7 +27,7 @@
  * About command
  */
 
-typedef enumerate {
+typedef enum {
     U2FHID_MSG,
     U2FHID_INIT,
     U2FHID_PING,
@@ -46,6 +46,9 @@ typedef enumerate {
  * decomposed on CMD, BCNT (length) and DATA (effective content).
  * Although, to be generic to USB and avoid any risk, considering
  * BCNT as a uint8_t field, data len is up to 256 bytes.
+ *
+ * In case of U2FHID_MSG commands, the data hold APDU formated U2F messages
+ * defined below.
  */
 typedef struct __packed {
     uint8_t  cmd;
@@ -108,4 +111,32 @@ typedef enum {
     U2F_ERR_INVALID_SEQ,
     U2F_ERR_MSG_TIMEOUT,
     U2F_ERR_CHANNEL_BUSY
-}
+} u2f_error_code_t;
+
+/************************************************************
+ * About U2FHID_MSG formats
+ *
+ * There is three types of U2FHID messages. All these messages are
+ * formatted using the T=0 APDU format.
+ */
+
+/*
+ * For these commands, the FIDO U2F raw message format datasheets specify the following
+ * in chap. 3:
+ * REGISTER:        INS=0x1,       P1=0x0,     P2=0x0
+ * AUTHENTICATE:    INS=0x2,       P1=0x3|7|8, P2=0x0
+ * VERSION:         INS=0x3,       P1=0x0,     P2=0x0
+ * VENDOR-SPECIFIC: INS=0x40-0xbf, NA,         NA
+ */
+typedef enum {
+    U2F_INS_REGISTER     = 0x1,
+    U2F_INS_AUTHENTICATE = 0x2,
+    U2F_INS_VERSION      = 0x3
+} u2f_msg_ins_t;
+
+
+/*
+ * Hande U2F commands
+ */
+mbed_error_t u2f_handle_request(u2f_cmd_t *cmd);
+
