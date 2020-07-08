@@ -67,11 +67,7 @@ static fido_u2f_context_t fido_ctx = {
     .report_sent = true,
     .u2f_cmd_received = false,
     .u2f_cmd_size = 0,
-    .u2f_cmd = {
-        .cmd = 0,
-        .bcnt = 0,
-        .data = { 0 }
-    }
+    .u2f_cmd = { 0 }
 };
 
 
@@ -232,4 +228,11 @@ mbed_error_t fido_exec(void)
     }
 err:
     return errcode;
+}
+
+/* local private API */
+
+uint8_t fido_get_usbhid_handler(void)
+{
+    return fido_ctx.hid_handler;
 }

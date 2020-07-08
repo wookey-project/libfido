@@ -33,4 +33,6 @@
 #endif
 
 
+uint8_t fido_get_usbhid_handler(void);
+
 #endif /*!FIDO_H_*/

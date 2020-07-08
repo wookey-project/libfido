@@ -13,6 +13,8 @@
  *  ---------------  ---------------------
  * [  USB backend driver                  ]
  */
+#ifndef U2F_H_
+#define U2F_H_
 #include "autoconf.h"
 #include "libc/types.h"
 
@@ -22,6 +24,10 @@
  */
 #define U2FHID_VENDOR_FIRST 42
 #define U2FHID_VENDOR_LAST  52
+
+#define U2FHID_BROADCAST_CID 0xffffffff
+
+#define USBHID_PROTO_VERSION 2
 
 /*****************************************
  * About command
@@ -56,7 +62,8 @@ typedef enum {
 typedef struct __packed {
     uint32_t cid;
     uint8_t  cmd;
-    uint8_t  bcnt;
+    uint8_t  bcnth;
+    uint8_t  bcntl;
     uint8_t  data[256];
 } u2f_cmd_t;
 
@@ -65,19 +72,21 @@ typedef struct __packed {
  * About responses
  */
 
+/*
+ * All messages are made of a header, and a differenciated data conent
+ * (depending on the message type)
+ */
 typedef struct __packed {
     uint32_t cid;
     uint8_t cmd;
-    uint8_t bcnt;
-    uint8_t data[256];
+    uint8_t bcnth;
+    uint8_t bcntl;
+    /* differenciated resp here */
 } u2f_resp_msg_t;
 
 typedef struct __packed {
-    uint32_t cid;
-    uint8_t cmd;
-    uint8_t bcnt;
     uint8_t nonce[8];
-    uint8_t chanid[4];
+    uint32_t chanid;
     uint8_t proto_version;
     uint8_t major_n;
     uint8_t minor_n;
@@ -85,33 +94,19 @@ typedef struct __packed {
     uint8_t capa_f;
 } u2f_resp_init_t;
 
-typedef struct __packed {
-    uint32_t cid;
-    uint8_t cmd;
-    uint8_t bcnt;
-    uint8_t data[256];
-} u2f_resp_ping_t;
-
-typedef struct __packed {
-    uint32_t cid;
-    uint8_t cmd;
-    uint8_t bcnt; /*< 0 */
-} u2f_resp_lock_t;
-
 
 /*
  * Optional response to WINK command
  */
 
-typedef struct __packed {
-    uint32_t cid;
-    uint8_t cmd;
-    uint8_t bcnt; /*< 0 */
-} u2f_resp_wink_t;
-
 typedef enum {
-    U2F_CAPABILITY_WINK,
-} u2f_capability_t;
+    U2FHID_CAPA_WINK  = 0x1,
+    U2FHID_CAPA_LOCK  = 0x1 << 1,
+    U2FHID_CAPA_CBOR  = 0x1 << 2,
+    U2FHID_CAPA_NMSG  = 0x1 << 3,
+} u2f_capa_id_t;
+
+
 
 typedef enum {
     U2F_ERR_INVALID_CMD,
@@ -147,5 +142,6 @@ typedef enum {
 /*
  * Hande U2F commands
  */
-mbed_error_t u2f_handle_request(u2f_cmd_t *cmd);
+mbed_error_t u2f_handle_request(const u2f_cmd_t *cmd);
 
+#endif/*!U2F_H_*/
