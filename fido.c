@@ -37,8 +37,8 @@
 #define FIDO_USAGE_FIDO_U2FHID   0x01
 #define FIDO_USAGE_FIDO_DATA_IN  0x20
 #define FIDO_USAGE_FIDO_DATA_OUT 0x21
-#define FIDO_USAGE_PAGE_BYTE0    0xd0
-#define FIDO_USAGE_PAGE_BYTE1    0xf1
+#define FIDO_USAGE_PAGE_BYTE1    0xd0
+#define FIDO_USAGE_PAGE_BYTE0    0xf1
 
 /* the current FIDO U2F context */
 typedef struct {
@@ -97,17 +97,17 @@ static usbhid_report_infos_t fido_std_report = {
         { USBHID_ITEM_TYPE_MAIN, USBHID_ITEM_MAIN_TAG_COLLECTION, 1, USBHID_COLL_ITEM_APPLICATION, 0 },
         { USBHID_ITEM_TYPE_LOCAL, USBHID_ITEM_LOCAL_TAG_USAGE, 1, FIDO_USAGE_FIDO_DATA_IN, 0 },
         { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_LOGICAL_MIN, 1, 0x0, 0 },
-        { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_LOGICAL_MAX, 1, 0xff, 0 },
+        { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_LOGICAL_MAX, 2, 0xff, 0 },
         { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_REPORT_SIZE, 1, 0x8, 0 },
-        { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_REPORT_COUNT, 1, 0x8, 0 }, /* report count in bytes */
-        { USBHID_ITEM_TYPE_MAIN, USBHID_ITEM_MAIN_TAG_INPUT, 1, USBHID_IOF_ITEM_DATA|USBHID_IOF_ITEM_ABSOLUTE|USBHID_IOF_ITEM_VARIABLE, 0 },
+        { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_REPORT_COUNT, 1, 64, 0 }, /* report count in bytes */
+        { USBHID_ITEM_TYPE_MAIN, USBHID_ITEM_MAIN_TAG_INPUT, 1, USBHID_IOF_ITEM_DATA|USBHID_IOF_ITEM_CONST|USBHID_IOF_ITEM_VARIABLE|USBHID_IOF_ITEM_RELATIVE, 0 },
 #include "api/libfido.h"
         { USBHID_ITEM_TYPE_LOCAL, USBHID_ITEM_LOCAL_TAG_USAGE, 1, FIDO_USAGE_FIDO_DATA_OUT, 0 },
         { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_LOGICAL_MIN, 1, 0x0, 0 },
-        { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_LOGICAL_MAX, 1, 0xff, 0 },
+        { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_LOGICAL_MAX, 2, 0xff, 0 },
         { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_REPORT_SIZE, 1, 0x8, 0 },
-        { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_REPORT_COUNT, 1, 0x8, 0 }, /* report count in bytes */
-        { USBHID_ITEM_TYPE_MAIN, USBHID_ITEM_MAIN_TAG_OUTPUT, 1, USBHID_IOF_ITEM_DATA|USBHID_IOF_ITEM_ABSOLUTE|USBHID_IOF_ITEM_VARIABLE, 0 },
+        { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_REPORT_COUNT, 1, 64, 0 }, /* report count in bytes */
+        { USBHID_ITEM_TYPE_MAIN, USBHID_ITEM_MAIN_TAG_OUTPUT, 1, USBHID_IOF_ITEM_DATA|USBHID_IOF_ITEM_CONST|USBHID_IOF_ITEM_VARIABLE|USBHID_IOF_ITEM_RELATIVE, 0 },
         { USBHID_ITEM_TYPE_MAIN, USBHID_ITEM_MAIN_TAG_END_COLLECTION, 0, 0, 0 }, /* C0 */
     }
 };
@@ -197,7 +197,7 @@ mbed_error_t fido_configure(void)
 /* we initialize our OUT EP to be ready to receive, if needed. */
 mbed_error_t fido_prepare_exec(void)
 {
-    return usbhid_recv_report(fido_ctx.hid_handler, (uint8_t*)&fido_ctx.u2f_cmd, sizeof(u2f_cmd_t));
+    return usbhid_recv_report(fido_ctx.hid_handler, (uint8_t*)&fido_ctx.u2f_cmd, 64);
 }
 
 /*
@@ -224,7 +224,9 @@ mbed_error_t fido_exec(void)
         /* an U2F command has been received! handle it! */
 
         errcode = u2f_handle_request(&fido_ctx.u2f_cmd);
-        usbhid_recv_report(fido_ctx.hid_handler, (uint8_t*)&fido_ctx.u2f_cmd, sizeof(u2f_cmd_t));
+        fido_ctx.u2f_cmd_received = false;
+        /* XXX: it seems that the FIFO size is hard-coded to 64 bytes */
+        usbhid_recv_report(fido_ctx.hid_handler, (uint8_t*)&fido_ctx.u2f_cmd, 64);
         /* now that current report/response has been consumed, ready to receive
          * new U2F report. Set reception EP ready */
     }

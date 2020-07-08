@@ -28,12 +28,15 @@
  */
 
 typedef enum {
-    U2FHID_MSG,
-    U2FHID_INIT,
-    U2FHID_PING,
-    U2FHID_ERROR,
-    U2FHID_WINK,
-    U2FHID_LOCK
+    U2FHID_PING      = 0x01,
+    U2FHID_MSG       = 0x03,
+    U2FHID_LOCK      = 0x04,
+    U2FHID_INIT      = 0x06,
+    U2FHID_WINK      = 0x08,
+    U2FHID_CBOR      = 0x10,
+    U2FHID_CANCEL    = 0x11,
+    U2FHID_KEEPALIVE = 0x3b,
+    U2FHID_ERROR     = 0x3f,
 } u2f_cmd_id_t;
 
 
@@ -51,6 +54,7 @@ typedef enum {
  * defined below.
  */
 typedef struct __packed {
+    uint32_t cid;
     uint8_t  cmd;
     uint8_t  bcnt;
     uint8_t  data[256];
@@ -62,12 +66,14 @@ typedef struct __packed {
  */
 
 typedef struct __packed {
+    uint32_t cid;
     uint8_t cmd;
     uint8_t bcnt;
     uint8_t data[256];
 } u2f_resp_msg_t;
 
 typedef struct __packed {
+    uint32_t cid;
     uint8_t cmd;
     uint8_t bcnt;
     uint8_t nonce[8];
@@ -80,12 +86,14 @@ typedef struct __packed {
 } u2f_resp_init_t;
 
 typedef struct __packed {
+    uint32_t cid;
     uint8_t cmd;
     uint8_t bcnt;
     uint8_t data[256];
 } u2f_resp_ping_t;
 
 typedef struct __packed {
+    uint32_t cid;
     uint8_t cmd;
     uint8_t bcnt; /*< 0 */
 } u2f_resp_lock_t;
@@ -96,6 +104,7 @@ typedef struct __packed {
  */
 
 typedef struct __packed {
+    uint32_t cid;
     uint8_t cmd;
     uint8_t bcnt; /*< 0 */
 } u2f_resp_wink_t;

@@ -4,11 +4,19 @@
 mbed_error_t u2f_handle_request(u2f_cmd_t *u2f_cmd)
 {
     mbed_error_t errcode = MBED_ERROR_NONE;
+    uint8_t cmd;
     if (u2f_cmd == NULL) {
         errcode = MBED_ERROR_INVPARAM;
         goto err;
     }
-    switch (u2f_cmd->cmd) {
+    if ((u2f_cmd->cmd & 0x80) == 0) {
+        log_printf("[U2F] CMD bit 7 must always be set\n");
+        errcode = MBED_ERROR_INVPARAM;
+        goto err;
+    }
+    /* cleaning bit 7 (always set, see above) */
+    cmd = u2f_cmd->cmd & 0x7f;
+    switch (cmd) {
         case U2FHID_INIT:
         {
             log_printf("[U2F] received U2F INIT\n");
@@ -40,7 +48,7 @@ mbed_error_t u2f_handle_request(u2f_cmd_t *u2f_cmd)
             break;
         }
         default:
-            log_printf("[U2F] Unkown cmd %d\n", u2f_cmd->cmd);
+            log_printf("[U2F] Unkown cmd %d\n", cmd);
             break;
     }
 err:
