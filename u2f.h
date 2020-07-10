@@ -84,14 +84,14 @@ typedef struct __packed {
     uint8_t bcnth;
     uint8_t bcntl;
     /* differenciated resp here */
-} ctaphid_resp_header_t;
+} ctaphid_init_header_t;
 
 /* header for fragmented packets */
 typedef struct __packed {
     uint32_t cid;
     uint8_t seq;
     /* differenciated resp here */
-} ctaphid_resp_seq_header_t;
+} ctaphid_seq_header_t;
 
 
 typedef struct __packed {

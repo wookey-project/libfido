@@ -7,8 +7,8 @@
 
 
 typedef union {
-    ctaphid_resp_header_t     init;
-    ctaphid_resp_seq_header_t seq;
+    ctaphid_init_header_t     init;
+    ctaphid_seq_header_t seq;
 } ctaphid_resp_headers_t;
 
 /* a response can be seen as a header with a trailing data
@@ -74,14 +74,14 @@ static mbed_error_t ctaphid_send_response(uint8_t *resp, uint16_t resp_len, uint
             full_resp.header.init.cmd = cmd;
             full_resp.header.init.bcnth = (resp_len & 0xff00) >> 8;
             full_resp.header.init.bcntl = (resp_len & 0xff);
-            offset = sizeof(ctaphid_resp_header_t);
+            offset = sizeof(ctaphid_init_header_t);
             max_resp_len = CTAPHID_FRAME_MAXLEN - offset;
         } else {
             log_printf("[CTAPHID] sequence response chunk\n");
             full_resp.header.seq.cid = cid;
             full_resp.header.seq.seq = sequence;
             sequence++;
-            offset = sizeof(ctaphid_resp_seq_header_t);
+            offset = sizeof(ctaphid_seq_header_t);
             max_resp_len = CTAPHID_FRAME_MAXLEN - offset;
         }
         /*now handle effective response content */

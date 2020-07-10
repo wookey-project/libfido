@@ -23,6 +23,7 @@
  */
 
 #include "libc/types.h"
+#include "libc/string.h"
 #include "libusbhid.h"
 #include "api/libfido.h"
 #include "u2f.h"
@@ -40,6 +41,13 @@
 #define FIDO_USAGE_PAGE_BYTE1    0xd0
 #define FIDO_USAGE_PAGE_BYTE0    0xf1
 
+typedef enum {
+    U2F_CMD_BUFFER_STATE_EMPTY,
+    U2F_CMD_BUFFER_STATE_BUFFERING,
+    U2F_CMD_BUFFER_STATE_COMPLETE,
+} fido_u2f_buffer_state_t;
+
+
 /* the current FIDO U2F context */
 typedef struct {
     bool                          ctx_locked;
@@ -51,8 +59,11 @@ typedef struct {
     uint8_t                       usbxdci_handler;
     /* U2F commands */
     volatile bool                 report_sent;
+    uint8_t                       recv_buf[CTAPHID_FRAME_MAXLEN];
+    fido_u2f_buffer_state_t       u2f_cmd_buf_state;
     bool                          u2f_cmd_received;
     uint16_t                      u2f_cmd_size;
+    uint16_t                      u2f_cmd_idx;
     ctaphid_cmd_t                 u2f_cmd;
 } fido_u2f_context_t;
 
@@ -65,10 +76,100 @@ static fido_u2f_context_t fido_ctx = {
     .hid_handler = 0,
     .usbxdci_handler = 0,
     .report_sent = true,
+    .recv_buf = { 0 },
+    .u2f_cmd_buf_state = U2F_CMD_BUFFER_STATE_EMPTY,
     .u2f_cmd_received = false,
     .u2f_cmd_size = 0,
+    .u2f_cmd_idx = 0,
     .u2f_cmd = { 0 }
 };
+
+
+mbed_error_t fido_extract_u2f_pkt(fido_u2f_context_t *ctx)
+{
+    mbed_error_t errcode = MBED_ERROR_NONE;
+
+    switch (ctx->u2f_cmd_buf_state) {
+        case U2F_CMD_BUFFER_STATE_COMPLETE:
+            errcode = MBED_ERROR_INVSTATE;
+            goto err;
+            break;
+        case U2F_CMD_BUFFER_STATE_EMPTY:
+        {
+            ctaphid_init_header_t *cmd = (ctaphid_init_header_t*)&ctx->recv_buf[0];
+            uint16_t blen = 0;
+            /* the pkt chunk in recv_pkt should be the first (maybe the only)
+             * chunk. The header is a CTAPHID_INIT header holding bcnth and bcntl
+             * fields */
+            blen = (cmd->bcnth << 8) | cmd->bcntl;
+            /* checking that len is not too long */
+            if (blen > 256) {
+                log_printf("[FIDO] fragmented packet too big for buffer! (%x bytes)\n", blen);
+                errcode = MBED_ERROR_NOMEM;
+                goto err;
+            }
+            ctx->u2f_cmd_size = blen;
+            /* whatever the size is, we copy 64 bytes in the cmd into u2f_cmd. */
+            memcpy((uint8_t*)(&ctx->u2f_cmd), &(ctx->recv_buf[0]), CTAPHID_FRAME_MAXLEN);
+            /* is this the last chunk (no other) ? */
+            /* set amount of data written */
+            ctx->u2f_cmd_idx = CTAPHID_FRAME_MAXLEN - sizeof(ctaphid_init_header_t);
+            if (ctx->u2f_cmd_idx >= blen) {
+                /* all command bytes received, buffer complete */
+                ctx->u2f_cmd_buf_state = U2F_CMD_BUFFER_STATE_COMPLETE;
+            } else {
+                /* not all requested bytes received. Just buffering and continue */
+                ctx->u2f_cmd_buf_state = U2F_CMD_BUFFER_STATE_BUFFERING;
+            }
+            break;
+        }
+        case U2F_CMD_BUFFER_STATE_BUFFERING:
+        {
+            /* here a previous chunk has already been received. Continue then */
+            /* currently received content *must* be a sequence, not an init
+             * frame */
+            ctaphid_seq_header_t *cmd = (ctaphid_seq_header_t*)&ctx->recv_buf;
+            if (cmd->cid != ctx->u2f_cmd.cid) {
+                log_printf("[FIDO] current chunk sequence CID does not match intial CID!\n");
+                errcode = MBED_ERROR_INVPARAM;
+                goto err;
+            }
+            /* TODO: sequences should be incremental, starting at 0, values, they should
+             * be checked for packet ordering...*/
+
+            /* copy the packet data only (sequence header is dropped during refragmentation */
+            memcpy((uint8_t*)(&ctx->u2f_cmd.data[ctx->u2f_cmd_idx]),
+                   &(ctx->recv_buf[sizeof(ctaphid_seq_header_t)]),
+                   CTAPHID_FRAME_MAXLEN - sizeof(ctaphid_seq_header_t));
+
+            ctx->u2f_cmd_idx += CTAPHID_FRAME_MAXLEN - sizeof(ctaphid_seq_header_t);
+            if (ctx->u2f_cmd_idx >= ctx->u2f_cmd_size) {
+                /* all command bytes received, buffer complete */
+                ctx->u2f_cmd_buf_state = U2F_CMD_BUFFER_STATE_COMPLETE;
+            } else {
+                /* XXX: TODO: the effective calcuation of the max idx is to be done.
+                 * As the packet is fragmented with multiple headers and the data
+                 * size effective allowed length is 256, we must calculate how many
+                 * packets of MAXLEN we can receive, and as a consequence, the copy
+                 * limit properly... */
+                if (ctx->u2f_cmd_idx > 210) {
+                    /* Not complete, yet nearly no more space ! */
+                    log_printf("[FIDO] fragmented packet too big for already consumed buffer!\n");
+                    errcode = MBED_ERROR_NOMEM;
+                    goto err;
+                }
+            }
+            break;
+        }
+        default:
+            errcode = MBED_ERROR_UNKNOWN;
+            goto err;
+            break;
+    }
+
+err:
+    return errcode;
+}
 
 
 /* USB HID trigger implementation, required to be triggered on various HID events */
@@ -193,7 +294,10 @@ mbed_error_t fido_configure(void)
 /* we initialize our OUT EP to be ready to receive, if needed. */
 mbed_error_t fido_prepare_exec(void)
 {
-    return usbhid_recv_report(fido_ctx.hid_handler, (uint8_t*)&fido_ctx.u2f_cmd, 64);
+    /*
+     * First tour MUST BE a CTAPHID_INIT packet, which is less than CTAPHID_FRAME_MAXLEN size.
+     */
+    return usbhid_recv_report(fido_ctx.hid_handler, (uint8_t*)&fido_ctx.recv_buf, CTAPHID_FRAME_MAXLEN);
 }
 
 /*
@@ -218,11 +322,19 @@ mbed_error_t fido_exec(void)
     /* TODO: set report to 0 */
     if (fido_ctx.u2f_cmd_received) {
         /* an U2F command has been received! handle it! */
-
-        errcode = u2f_handle_request(&fido_ctx.u2f_cmd);
+        /* is the packet fragmented ? If yes, just buffer it and continue.... */
+        if ((errcode = fido_extract_u2f_pkt(&fido_ctx)) != MBED_ERROR_NONE) {
+            log_printf("[FIDO] error during recv packet refragmentation, err=%x\n", errcode);
+            goto err;
+        }
+        if (fido_ctx.u2f_cmd_buf_state == U2F_CMD_BUFFER_STATE_COMPLETE) {
+            /* not fragmented ? if the buffer should handle a CTAPHID request that is clean
+             * and ready to be handled. Let's treat it. */
+            errcode = u2f_handle_request(&fido_ctx.u2f_cmd);
+        }
         fido_ctx.u2f_cmd_received = false;
         /* XXX: it seems that the FIFO size is hard-coded to 64 bytes */
-        usbhid_recv_report(fido_ctx.hid_handler, (uint8_t*)&fido_ctx.u2f_cmd, 64);
+        usbhid_recv_report(fido_ctx.hid_handler, (uint8_t*)&fido_ctx.recv_buf, CTAPHID_FRAME_MAXLEN);
         /* now that current report/response has been consumed, ready to receive
          * new U2F report. Set reception EP ready */
     }
