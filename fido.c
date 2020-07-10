@@ -53,7 +53,7 @@ typedef struct {
     volatile bool                 report_sent;
     bool                          u2f_cmd_received;
     uint16_t                      u2f_cmd_size;
-    u2f_cmd_t                     u2f_cmd;
+    ctaphid_cmd_t                 u2f_cmd;
 } fido_u2f_context_t;
 
 /* fido context .data initialization */
@@ -74,7 +74,7 @@ static fido_u2f_context_t fido_ctx = {
 /* USB HID trigger implementation, required to be triggered on various HID events */
 mbed_error_t usbhid_report_received_trigger(uint8_t hid_handler, uint16_t size)
 {
-   log_printf("[FIDO] Received FIDO cmd (size %d)\n", size);
+   log_printf("[CTAPHID] Received FIDO cmd (size %d)\n", size);
    fido_ctx.u2f_cmd_received = true;
    fido_ctx.u2f_cmd_size = size;
    /* nothing more to do, as the received  command is already set in .u2f_cmd field */
@@ -97,7 +97,6 @@ static usbhid_report_infos_t fido_std_report = {
         { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_REPORT_SIZE, 1, 0x8, 0 },
         { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_REPORT_COUNT, 1, 64, 0 }, /* report count in bytes */
         { USBHID_ITEM_TYPE_MAIN, USBHID_ITEM_MAIN_TAG_INPUT, 1, USBHID_IOF_ITEM_DATA|USBHID_IOF_ITEM_CONST|USBHID_IOF_ITEM_VARIABLE|USBHID_IOF_ITEM_RELATIVE, 0 },
-#include "api/libfido.h"
         { USBHID_ITEM_TYPE_LOCAL, USBHID_ITEM_LOCAL_TAG_USAGE, 1, FIDO_USAGE_FIDO_DATA_OUT, 0 },
         { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_LOGICAL_MIN, 1, 0x0, 0 },
         { USBHID_ITEM_TYPE_GLOBAL, USBHID_ITEM_GLOBAL_TAG_LOGICAL_MAX, 2, 0xff, 0 },
@@ -114,10 +113,10 @@ static usbhid_report_infos_t fido_std_report = {
 static mbed_error_t           usbhid_set_idle(uint8_t hid_handler, uint8_t idle)
 {
     hid_handler = hid_handler;
-    log_printf("[FIDO] triggered on Set_Idle\n");
+    log_printf("[CTAPHID] triggered on Set_Idle\n");
     fido_ctx.idle_ms = idle;
     fido_ctx.idle = true;
-    log_printf("[FIDO] set idle time to %d ms\n", idle);
+    log_printf("[CTAPHID] set idle time to %d ms\n", idle);
     return MBED_ERROR_NONE;
 }
 
@@ -125,7 +124,7 @@ static mbed_error_t           usbhid_set_idle(uint8_t hid_handler, uint8_t idle)
 /* trigger for HID layer GET_REPORT event */
 static usbhid_report_infos_t *usbhid_get_report(uint8_t hid_handler, uint8_t index)
 {
-    log_printf("[FIDO] triggered on Get_Report\n");
+    log_printf("[CTAPHID] triggered on Get_Report\n");
     usbhid_report_infos_t *report = NULL;
     hid_handler = hid_handler; /* only one iface: 0 */
     switch (index) {
@@ -133,6 +132,7 @@ static usbhid_report_infos_t *usbhid_get_report(uint8_t hid_handler, uint8_t ind
             report = fido_ctx.fido_report;
             break;
         default:
+            log_printf("[CTAPHID] unkown report index %d\n", index);
             break;
     }
     return report;
@@ -159,24 +159,24 @@ mbed_error_t fido_declare(uint8_t usbxdci_handler)
     fido_ctx.usbxdci_handler = usbxdci_handler;
     fido_ctx.fido_report = &fido_std_report;
 
-    log_printf("[KBD] declare usbhid interface for FIDO U2F\n");
+    log_printf("[CTAPHID] declare usbhid interface for FIDO U2F\n");
     errcode = usbhid_declare(usbxdci_handler,
                              USBHID_SUBCLASS_NONE, USBHID_PROTOCOL_NONE,
                              FIDO_DESCRIPOR_NUM, FIDO_POLL_TIME, true,
                              64, &(fido_ctx.hid_handler));
     if (errcode != MBED_ERROR_NONE) {
-        log_printf("[FIDO] failure while declaring FIDO interface: err=%d\n", errcode);
+        log_printf("[CTAPHID] failure while declaring FIDO interface: err=%d\n", errcode);
         goto err;
     }
     /* configure HID interface */
-    log_printf("[FIDO] configure usbhid device\n");
+    log_printf("[CTAPHID] configure usbhid device\n");
     errcode = usbhid_configure(fido_ctx.hid_handler,
                      usbhid_get_report,
                      NULL, /* set report */
                      NULL, /* set proto */
                      usbhid_set_idle);
     if (errcode != MBED_ERROR_NONE) {
-        log_printf("[FIDO] failure while configuring FIDO interface: err=%d\n", errcode);
+        log_printf("[CTAPHID] failure while configuring FIDO interface: err=%d\n", errcode);
         goto err;
     }
 

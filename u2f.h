@@ -1,16 +1,14 @@
 /*
- * TODO:
- * FIDO U2F is using APDU (ISO7816-4 framing).
- * APDU encapsulation is handled by libiso7816, over libusbhid for IN and OUT Endpoints.
  * The overall device stacking is the following:
  *
- * [ FIDO U2F CMD  ][   FIDO Ctrl         ]   <---- this library
+ * [APDU  |  CBOR ]                         <--- CTAPHID1: APDU framing
+ *                                               CTAPHID2: CBOR capa: CBOR (Json)
  *  ---------------
- * [ (APDU framing)]
+ * [ FIDO U2F CMD  ][   FIDO Ctrl         ] <--- CTAPHID cmd level
  *  ---------------  ---------------------
  * [  libUSBHID    ][ libxDCI             ]
  * [ (HID stack)   ][ (USB control plane) ]
- *  ---------------  ---------------------
+ *  -[InEP]-[OutEP]---------[EP0]---------
  * [  USB backend driver                  ]
  */
 #ifndef U2F_H_
@@ -20,7 +18,7 @@
 
 /*
  * FIXME to define properly:
- * range of u2f_cmd_id for vendor specific commands
+ * range of ctaphid_cmd_id for vendor specific commands
  */
 #define U2FHID_VENDOR_FIRST 42
 #define U2FHID_VENDOR_LAST  52
@@ -28,6 +26,7 @@
 #define U2FHID_BROADCAST_CID 0xffffffff
 
 #define USBHID_PROTO_VERSION 2
+#define CTAPHID_FRAME_MAXLEN 64
 
 /*****************************************
  * About command
@@ -43,7 +42,7 @@ typedef enum {
     U2FHID_CANCEL    = 0x11,
     U2FHID_KEEPALIVE = 0x3b,
     U2FHID_ERROR     = 0x3f,
-} u2f_cmd_id_t;
+} ctaphid_cmd_id_t;
 
 
 /*
@@ -64,8 +63,11 @@ typedef struct __packed {
     uint8_t  cmd;
     uint8_t  bcnth;
     uint8_t  bcntl;
-    uint8_t  data[256];
-} u2f_cmd_t;
+    uint8_t  data[256]; /* data is a blob here, but is a structured content, depending
+                           on the cmd value. It can be encoded using APDU format or CBOR
+                           format.
+CAUTION: the CTAPHID c*/
+} ctaphid_cmd_t;
 
 
 /******************************************
@@ -82,7 +84,15 @@ typedef struct __packed {
     uint8_t bcnth;
     uint8_t bcntl;
     /* differenciated resp here */
-} u2f_resp_msg_t;
+} ctaphid_resp_header_t;
+
+/* header for fragmented packets */
+typedef struct __packed {
+    uint32_t cid;
+    uint8_t seq;
+    /* differenciated resp here */
+} ctaphid_resp_seq_header_t;
+
 
 typedef struct __packed {
     uint8_t nonce[8];
@@ -92,7 +102,7 @@ typedef struct __packed {
     uint8_t minor_n;
     uint8_t build_n;
     uint8_t capa_f;
-} u2f_resp_init_t;
+} ctaphid_resp_init_t;
 
 
 /*
@@ -104,7 +114,7 @@ typedef enum {
     U2FHID_CAPA_LOCK  = 0x1 << 1,
     U2FHID_CAPA_CBOR  = 0x1 << 2,
     U2FHID_CAPA_NMSG  = 0x1 << 3,
-} u2f_capa_id_t;
+} ctaphid_capa_id_t;
 
 
 
@@ -115,7 +125,7 @@ typedef enum {
     U2F_ERR_INVALID_SEQ,
     U2F_ERR_MSG_TIMEOUT,
     U2F_ERR_CHANNEL_BUSY
-} u2f_error_code_t;
+} ctabhid_error_code_t;
 
 /************************************************************
  * About U2FHID_MSG formats
@@ -136,12 +146,12 @@ typedef enum {
     U2F_INS_REGISTER     = 0x1,
     U2F_INS_AUTHENTICATE = 0x2,
     U2F_INS_VERSION      = 0x3
-} u2f_msg_ins_t;
+} ctaphid_msg_ins_t;
 
 
 /*
  * Hande U2F commands
  */
-mbed_error_t u2f_handle_request(const u2f_cmd_t *cmd);
+mbed_error_t u2f_handle_request(const ctaphid_cmd_t *cmd);
 
 #endif/*!U2F_H_*/
