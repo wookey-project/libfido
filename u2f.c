@@ -1,8 +1,9 @@
-#include "u2f.h"
-#include "fido.h"
-#include "channel.h"
 #include "libc/string.h"
 #include "libusbhid.h"
+#include "fido.h"
+#include "channel.h"
+#include "apdu.h"
+#include "u2f.h"
 
 
 typedef union {
@@ -17,6 +18,11 @@ typedef union {
     uint8_t    data[64]; /* all responses are padded to 64 bytes */
 } ctaphid_resp_t;
 
+
+/*******************************************************************
+ * local utility functions, that handle errors, response transmission
+ * and so on....
+ */
 
 /*
  * A CTAPHID response may be bigger than the CTAPHID Out endpoint MPSize.
@@ -100,10 +106,76 @@ err:
     return errcode;
 }
 
+static inline mbed_error_t handle_rq_error(uint32_t cid, ctabhid_error_code_t hid_error)
+{
+    /* C enumerate length may vary depending on the compiler. Thouht, the
+     * HID error type is defined to handle unsigned values up to 256 max */
+    uint8_t error = hid_error;
+    return ctaphid_send_response((uint8_t*)&error, sizeof(uint8_t), cid, U2FHID_INIT|0x80);
+}
+
+
+/*******************************************************************
+ * Each request effective handling. These functions may depend on local utility (see above)
+ * or on FIDO cryptographic backend (effective FIDO U2F cryptographic implementation
+ * in the Token).
+ */
+/*
+ * Handling U2FHID_MSG command
+ */
+static mbed_error_t handle_rq_msg(const ctaphid_cmd_t* cmd)
+{
+    mbed_error_t errcode = MBED_ERROR_NONE;
+    uint32_t cid = cmd->cid;
+    /* CTAPHID level sanitation */
+    /* endianess... */
+    uint16_t bcnt = (cmd->bcnth << 8) | cmd->bcntl;
+    if (bcnt < 4) {
+        log_printf("[CTAPHID] CTAPHID_MSG pkt len must be at least 4, found %d\n", bcnt);
+        handle_rq_error(cid, U2F_ERR_INVALID_PAR);
+        errcode = MBED_ERROR_INVPARAM;
+        goto err;
+    }
+    if (cid == 0 || cid == U2FHID_BROADCAST_CID) {
+        log_printf("[CTAPHID] CTAPHID_INIT CID must be nonzero\n");
+        handle_rq_error(cid, U2F_ERR_INVALID_PAR);
+        errcode = MBED_ERROR_INVPARAM;
+        goto err;
+    }
+    if (channel_exists(cid) == false) {
+        /* invalid channel */
+        log_printf("[CTAPHID][MSG] New CID: %f\n", cid);
+        handle_rq_error(cid, U2F_ERR_INVALID_PAR);
+        goto err;
+    }
+
+    /* now that header is sanitized, let's push the data content
+     * to the backend
+     * FIXME: by now, calling APDU backend, no APDU vs CBOR detection */
+    uint8_t msg_resp[256] = { 0 };
+    uint16_t resp_len = 0;
+
+    errcode = apdu_handle_request(msg_resp, &resp_len);
+    if (errcode != MBED_ERROR_NONE) {
+        log_printf("[CTAPHID][MSG] APDU requests handling failed!\n");
+        handle_rq_error(cid, U2F_ERR_INVALID_CMD);
+        goto err;
+    }
+    log_printf("[CTAPHID][MSG] Sending back response\n");
+    errcode = ctaphid_send_response(&msg_resp[0], resp_len, cid, U2FHID_MSG|0x80);
+err:
+    return errcode;
+}
+
+
+
+/*
+ * Handling U2FHID_INIT command
+ */
 static mbed_error_t handle_rq_init(const ctaphid_cmd_t* cmd)
 {
     mbed_error_t errcode = MBED_ERROR_NONE;
-    uint32_t curcid;
+    uint32_t curcid = cmd->cid;
     uint32_t newcid;
     /* CTAPHID level sanitation */
     /* endianess... */
@@ -111,19 +183,20 @@ static mbed_error_t handle_rq_init(const ctaphid_cmd_t* cmd)
     if (bcnt != 8) {
         log_printf("[CTAPHID] CTAPHID_INIT pkt len must be 8, found %d\n", bcnt);
         log_printf("[CTAPHID] bcnth: %x, bcntl: %x\n", cmd->bcnth, cmd->bcntl);
+        handle_rq_error(curcid, U2F_ERR_INVALID_PAR);
         errcode = MBED_ERROR_INVPARAM;
         goto err;
     }
     if (cmd->cid == 0) {
         log_printf("[CTAPHID] CTAPHID_INIT CID must be nonzero\n");
+        handle_rq_error(curcid, U2F_ERR_INVALID_PAR);
         errcode = MBED_ERROR_INVPARAM;
         goto err;
     }
-    curcid = cmd->cid;
     if (curcid == U2FHID_BROADCAST_CID) {
         /* new channel request */
         channel_create(&newcid);
-        log_printf("[CTAPHID][INIT] New CID: %f\n", newcid);
+        log_printf("[CTAPHID][INIT] New CID: %x\n", newcid);
     } else {
         newcid = curcid;
     }
@@ -145,6 +218,11 @@ err:
     return errcode;
 }
 
+
+/******************************************************
+ * Requests dispatcher
+ */
+
 mbed_error_t u2f_handle_request(const ctaphid_cmd_t *ctaphid_cmd)
 {
     mbed_error_t errcode = MBED_ERROR_NONE;
@@ -155,6 +233,7 @@ mbed_error_t u2f_handle_request(const ctaphid_cmd_t *ctaphid_cmd)
     }
     if ((ctaphid_cmd->cmd & 0x80) == 0) {
         log_printf("[CTAPHID] CMD bit 7 must always be set\n");
+        handle_rq_error(ctaphid_cmd->cid, U2F_ERR_INVALID_PAR);
         errcode = MBED_ERROR_INVPARAM;
         goto err;
     }

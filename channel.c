@@ -31,3 +31,20 @@ mbed_error_t channel_create(uint32_t *newcid)
 err:
     return errcode;
 }
+
+bool channel_exists(uint32_t cid)
+{
+    uint32_t i = 0;
+    bool result = false;
+
+    for (i = 0; i < MAX_CIDS; ++i) {
+        if (chans[i].used == true) {
+            if (cid == i+1) {
+                result = true;
+                goto end;
+            }
+        }
+    }
+end:
+    return result;
+}

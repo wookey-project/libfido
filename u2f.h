@@ -119,12 +119,15 @@ typedef enum {
 
 
 typedef enum {
-    U2F_ERR_INVALID_CMD,
-    U2F_ERR_INVALID_PAR,
-    U2F_ERR_INVALID_LEN,
-    U2F_ERR_INVALID_SEQ,
-    U2F_ERR_MSG_TIMEOUT,
-    U2F_ERR_CHANNEL_BUSY
+    U2F_ERR_NONE         = 0x0,
+    U2F_ERR_INVALID_CMD  = 0x1,
+    U2F_ERR_INVALID_PAR  = 0x2,
+    U2F_ERR_INVALID_LEN  = 0x3,
+    U2F_ERR_INVALID_SEQ  = 0x4,
+    U2F_ERR_MSG_TIMEOUT  = 0x5,
+    U2F_ERR_CHANNEL_BUSY = 0x6,
+    /* to continue, there is various CTAP1 vs CTAP2 error codes.
+     * Althought, codes are encoded on uint8_t values */
 } ctabhid_error_code_t;
 
 /************************************************************
