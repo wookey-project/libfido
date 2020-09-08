@@ -28,16 +28,9 @@
 #include "autoconf.h"
 #include "libc/types.h"
 
-mbed_error_t fido_declare(uint8_t usbxdci_handler);
 
-mbed_error_t fido_configure(void);
-
-/* to be executed once. This set OUT EP in DATA mode, ready to receive, for the fist time.
- * Other successive cases will be handled by fido_exec()
- * XXX: a cleaner way would be to implement an automaton with a state in the context,
- * separating an INIT mode from a RUNNING mode */
-mbed_error_t fido_prepare_exec(void);
-
-mbed_error_t fido_exec(void);
+mbed_error_t u2f_fido_handle_cmd(uint32_t metadata,
+                                 uint8_t * msg, uint16_t len_in,
+                                 uint8_t *resp, uint16_t *len_out);
 
 #endif/*!LIBFIDO_H_*/
