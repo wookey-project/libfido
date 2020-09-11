@@ -13,16 +13,13 @@
 static int enforce_user_presence(uint32_t timeout __attribute__((unused)))
 {
 #ifdef U2F_FIDO_EMULATE_USER_PRESENCE
-#ifdef U2F_FIDO_DEBUG
 	log_printf("[U2F_FIDO] user presence emulated!\n");
-#endif
 	return 0;
 #else
-#ifdef U2F_FIDO_DEBUG
 	log_printf("[U2F_FIDO] Wait for user presence with timeout %d seconds\n", timeout);
-#endif
 	/* Test for user presence with timeout in seconds */
-	return platform_enforce_user_presence(timeout);
+	// TODO via backend return platform_enforce_user_presence(timeout);
+    return 0;
 #endif
 }
 
@@ -36,6 +33,7 @@ static const uint8_t master_key_hmac2[32] = { 0x11, 0x22 };
 static mbed_error_t generate_key_handle(uint8_t *key_handle, uint16_t *key_handle_len, uint8_t *application_parameter, uint16_t application_parameter_len)
 {
     mbed_error_t errcode;
+    log_printf("[U2F_FIDO] %s\n", __func__);
 	/* Sanity check */
 	if((key_handle == NULL) || (key_handle_len == NULL)){
         errcode = MBED_ERROR_INVPARAM;
@@ -68,6 +66,7 @@ static mbed_error_t generate_key_handle(uint8_t *key_handle, uint16_t *key_handl
 	/* Our Key handle is the concatenation of Nonce and HMAC */
 	hmac_finalize(&hmac_ctx, key_handle + KEY_HANDLE_NONCE_SIZE, &hmac_len);
 	if(hmac_len != 32){
+        log_printf("[U2F_FIDO] error while calculating HMAC!\n");
         errcode = MBED_ERROR_UNKNOWN;
 		goto err;
 	}
@@ -123,6 +122,7 @@ err:
 static int generate_ECDSA_priv_key(uint8_t *key_handle, uint16_t key_handle_len, uint8_t *priv_key, uint16_t *priv_key_len, uint8_t *application_parameter, uint16_t application_parameter_len)
 {
     mbed_error_t errcode;
+    log_printf("[U2F_FIDO] %s\n", __func__);
 	/* Sanity checks */
 	if((key_handle == NULL) || (priv_key_len == NULL) || (priv_key == NULL)){
         errcode = MBED_ERROR_INVPARAM;
@@ -156,12 +156,14 @@ static int generate_ECDSA_priv_key(uint8_t *key_handle, uint16_t key_handle_len,
 		goto err;
 	}
 	/* We want to ensure that the private key is < q (the order of the curve) */
+    log_printf("plop\n");
     /* libecc internal structure holding the curve parameters */
     const ec_str_params *the_curve_const_parameters;
     ec_params curve_params;
     the_curve_const_parameters = ec_get_curve_params_by_type(SECP256R1);
     /* Get out if getting the parameters went wrong */
     if (the_curve_const_parameters == NULL) {
+        log_printf("[U2F_FIDO] error while building curve const params\n");
         errcode = MBED_ERROR_UNKNOWN;
         goto err;
     }
@@ -386,6 +388,7 @@ int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), uint8_t * msg, 
 	}
 	/* We always ask for user presence in all the cases */
 	if(enforce_user_presence(3)){
+        log_printf("[U2F_FIDO] user presence check failed\n");
 		error = REQUIRE_TEST_USER_PRESENCE;
 		goto err;
 	}
@@ -404,10 +407,12 @@ int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), uint8_t * msg, 
 	}
 
 	if(generate_ECDSA_priv_key(key_handle, key_handle_len, priv_key_buff, &priv_key_buff_len, in_msg->application_parameter, sizeof(in_msg->application_parameter))){
+        log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
 		error = INVALID_KEY_HANDLE;
 		goto err;
 	}
 	if(priv_key_buff_len != PRIV_KEY_SIZE){
+        log_printf("[U2F FIDO] invalid ECDSA priv key size\n");
 		error = INVALID_KEY_HANDLE;
 		goto err;
 	}
