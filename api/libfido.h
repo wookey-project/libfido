@@ -28,9 +28,23 @@
 #include "autoconf.h"
 #include "libc/types.h"
 
+/*
+ * wait for user presence event (typically a button) and return TRUE if
+ * button pushed. Otherwhise return FALSE.
+ */
+typedef bool (*userpresence_request_cb_t)(uint16_t timeout_ms);
+
+/*
+ * Wink event (LEDs, ... for timeout_ms milliseconds).
+ */
+typedef mbed_error_t (*wink_request_cb_t)(uint16_t timeout_ms);
+
+mbed_error_t u2f_fido_initialize(userpresence_request_cb_t userpresence_cb,
+                                 wink_request_cb_t         wink_cb);
 
 mbed_error_t u2f_fido_handle_cmd(uint32_t metadata,
                                  uint8_t * msg, uint16_t len_in,
                                  uint8_t *resp, uint16_t *len_out);
+
 
 #endif/*!LIBFIDO_H_*/

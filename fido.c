@@ -7,19 +7,34 @@
 #include "fido.h"
 
 
-#define U2F_FIDO_EMULATE_USER_PRESENCE
+userpresence_request_cb_t cb_userpresence = NULL;
+wink_request_cb_t         cb_wink         = NULL;
+
+mbed_error_t u2f_fido_initialize(userpresence_request_cb_t userpresence_cb,
+                                 wink_request_cb_t         wink_cb)
+{
+    log_printf("[U2F_FIDO] declaring userpresence & wink backend callbacks\n");
+    cb_userpresence = userpresence_cb;
+    cb_wink = wink_cb;
+    return MBED_ERROR_NONE;
+}
 
 /* Primitive to enforce user presence */
 static int enforce_user_presence(uint32_t timeout __attribute__((unused)))
 {
-#ifdef U2F_FIDO_EMULATE_USER_PRESENCE
+#ifdef CONFIG_USR_LIB_FIDO_EMULATE_USERPRESENCE
 	log_printf("[U2F_FIDO] user presence emulated!\n");
 	return 0;
 #else
 	log_printf("[U2F_FIDO] Wait for user presence with timeout %d seconds\n", timeout);
 	/* Test for user presence with timeout in seconds */
 	// TODO via backend return platform_enforce_user_presence(timeout);
-    return 0;
+    if (cb_userpresence != NULL) {
+        if (cb_userpresence(timeout*1000) == true) {
+            return 0;
+        }
+    }
+    return 1;
 #endif
 }
 

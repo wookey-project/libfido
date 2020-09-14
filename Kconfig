@@ -20,6 +20,15 @@ config USR_LIB_FIDO_DEBUG
     * 2: command dump debug, dumping complex commands content and
          received and sent data size
 
+
+config USR_LIB_FIDO_EMULATE_USERPRESENCE
+   bool "Emulate user presence event"
+   default n
+   ---help---
+   Instead of waiting for effective user presence event, emulate directly
+   user presence as if the user presence backend returned a valid action.
+
+
 endmenu
 
 endif
