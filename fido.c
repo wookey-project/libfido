@@ -21,7 +21,11 @@ static int enforce_user_presence(uint32_t timeout __attribute__((unused)))
 {
 #ifdef CONFIG_USR_LIB_FIDO_EMULATE_USERPRESENCE
 	log_printf("[U2F_FIDO] user presence emulated!\n");
-	return 0;
+# if USR_LIB_FIDO_EMULATE_NOUSER
+	return 1;
+# else
+    return 0;
+# endif
 #else
 	log_printf("[U2F_FIDO] Wait for user presence with timeout %d seconds\n", timeout);
 	/* Test for user presence with timeout in seconds */

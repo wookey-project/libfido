@@ -28,6 +28,15 @@ config USR_LIB_FIDO_EMULATE_USERPRESENCE
    Instead of waiting for effective user presence event, emulate directly
    user presence as if the user presence backend returned a valid action.
 
+if USR_LIB_FIDO_EMULATE_USERPRESENCE
+
+config USR_LIB_FIDO_EMULATE_NOUSER
+   bool "Emulate user absence"
+   default n
+   ---help---
+   Emulate that the user does not acknowledge the host request.
+
+endif
 
 endmenu
 
