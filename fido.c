@@ -8,14 +8,11 @@
 
 
 userpresence_request_cb_t cb_userpresence = NULL;
-wink_request_cb_t         cb_wink         = NULL;
 
-mbed_error_t u2f_fido_initialize(userpresence_request_cb_t userpresence_cb,
-                                 wink_request_cb_t         wink_cb)
+mbed_error_t u2f_fido_initialize(userpresence_request_cb_t userpresence_cb)
 {
     log_printf("[U2F_FIDO] declaring userpresence & wink backend callbacks\n");
     cb_userpresence = userpresence_cb;
-    cb_wink = wink_cb;
     return MBED_ERROR_NONE;
 }
 
