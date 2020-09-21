@@ -393,7 +393,7 @@ int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), uint8_t * msg, 
 
 	if((len_out == NULL) || (resp == NULL) || (msg == NULL)){
 		error = WRONG_LENGTH;
-		goto err;
+		goto err_init;
 	}
 	/* Sanity check on the inputs
 	 * Should be:
@@ -579,6 +579,7 @@ int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), uint8_t * msg, 
 	return NO_ERROR;
 err:
 	*len_out = 0;
+err_init:
 	return error;
 }
 
@@ -607,7 +608,7 @@ int u2f_fido_authenticate(uint8_t u2f_param, uint8_t * msg, uint16_t len_in, uin
 
 	if((len_out == NULL) || (resp == NULL) || (msg == NULL)){
 		error = WRONG_LENGTH;
-		goto err;
+		goto err_init;
 	}
 	if(len_in != sizeof(authenticate_msg)){
 		error = WRONG_LENGTH;
@@ -749,6 +750,7 @@ int u2f_fido_authenticate(uint8_t u2f_param, uint8_t * msg, uint16_t len_in, uin
 	return NO_ERROR;
 err:
 	*len_out = 0;
+err_init:
 	return error;
 }
 
