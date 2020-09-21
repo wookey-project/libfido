@@ -302,7 +302,7 @@ int u2f_fido_version(uint8_t u2f_param __attribute__((unused)), uint8_t * msg __
 
 	if((len_out == NULL) || (resp == NULL)){
 		error = WRONG_LENGTH;
-		goto err;
+		goto err_init;
 	}
 	/* We do not expect any data in this command */
 	if(len_in != 0){
@@ -321,6 +321,7 @@ int u2f_fido_version(uint8_t u2f_param __attribute__((unused)), uint8_t * msg __
 	return NO_ERROR;
 err:
 	*len_out = 0;
+err_init:
 	return error;
 }
 
