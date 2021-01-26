@@ -451,12 +451,9 @@ int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), uint8_t * msg, 
 	/* Now compute our public key */
 	ecdsa_init_pub_key(&pub_key, &priv_key);
 	/* Extract x and y from our public key in buffers */
-	uint8_t pubkey_x[PUB_KEY_X_SIZE] = { 0 };
-	uint8_t pubkey_y[PUB_KEY_Y_SIZE] = { 0 };
-	aff_pt Pub_aff;
-	prj_pt_to_aff(&Pub_aff, &(pub_key.y));
-	fp_export_to_buf(pubkey_x, sizeof(pubkey_x), &(Pub_aff.x));
-	fp_export_to_buf(pubkey_y, sizeof(pubkey_y), &(Pub_aff.y));
+	uint8_t pubkey_x_y[PUB_KEY_X_SIZE + PUB_KEY_Y_SIZE] = { 0 };
+	/* Unique affine equivalent representation */
+	prj_pt_export_to_aff_buf(&(pub_key.y), (uint8_t*)&pubkey_x_y, sizeof(pubkey_x_y));
 	/* Import attestation key pair */
 	ec_key_pair attestation_key_pair;
 	/* Sanity check: pub key buffer must be in uncompressed form */
@@ -507,11 +504,11 @@ int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), uint8_t * msg, 
 		error = INVALID_KEY_HANDLE;
                 goto err;
         }
-	if(ec_sign_update(&sig_ctx, (const uint8_t*)&pubkey_x, sizeof(pubkey_x))){
+	if(ec_sign_update(&sig_ctx, (const uint8_t*)&pubkey_x_y[0], PUB_KEY_X_SIZE)){
 		error = INVALID_KEY_HANDLE;
                 goto err;
         }
-	if(ec_sign_update(&sig_ctx, (const uint8_t*)&pubkey_y, sizeof(pubkey_y))){
+	if(ec_sign_update(&sig_ctx, (const uint8_t*)&pubkey_x_y[PUB_KEY_X_SIZE], PUB_KEY_Y_SIZE)){
 		error = INVALID_KEY_HANDLE;
                 goto err;
         }
@@ -557,9 +554,9 @@ int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), uint8_t * msg, 
 	offset += 1;
 	resp[offset] = ASN1_UNCOMPRESSED_POINT_TAG; /* Uncompressed point */
 	offset += 1;
-	local_memcpy(&resp[offset], &pubkey_x, PUB_KEY_X_SIZE);
+	local_memcpy(&resp[offset], &pubkey_x_y[0], PUB_KEY_X_SIZE);
 	offset += PUB_KEY_X_SIZE;
-	local_memcpy(&resp[offset], &pubkey_y, PUB_KEY_Y_SIZE);
+	local_memcpy(&resp[offset], &pubkey_x_y[PUB_KEY_X_SIZE], PUB_KEY_Y_SIZE);
 	offset += PUB_KEY_Y_SIZE;
 	resp[offset] = KEY_HANDLE_SIZE;
 	offset += 1;
