@@ -28,7 +28,7 @@
 #include "libc/types.h"
 #include "api/libfido.h"
 
-#if CONFIG_USR_LIB_FIDO_DEBUG
+#if CONFIG_USR_LIB_FIDO_DEBUG > 0
 # define log_printf(...) printf(__VA_ARGS__)
 #else
 # define log_printf(...)
