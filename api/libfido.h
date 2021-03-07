@@ -37,7 +37,7 @@ typedef bool (*userpresence_request_cb_t)(uint16_t timeout_ms);
 mbed_error_t u2f_fido_initialize(userpresence_request_cb_t userpresence_cb);
 
 mbed_error_t u2f_fido_handle_cmd(uint32_t metadata,
-                                 uint8_t * msg, uint16_t len_in,
+                                 const uint8_t * msg, uint16_t len_in,
                                  uint8_t *resp, uint16_t *len_out);
 
 
