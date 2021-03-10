@@ -3,7 +3,6 @@
 #include "libc/string.h"
 #include "libsig.h"
 #include "hmac.h"
-//#include "u2f_platform.h"
 #include "fido.h"
 /* Include our private data */
 #include "AUTH/FIDO/attestation.der.h"
@@ -41,33 +40,31 @@ static int enforce_user_presence(uint32_t timeout __attribute__((unused)))
 #endif
 }
 
-#define UNSAFE_LOCAL_KEY_HANDLE_GENERATION
+/************* UNSAFE_LOCAL_KEY_HANDLE_GENERATION ***********************/
+//#define UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 
 #ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 #define KEY_HANDLE_NONCE_SIZE 32
 /* HMAC Keys for Key handle and private keys computations */
 static const uint8_t master_key_hmac1[32] = { 0x01, 0x02 };
 static const uint8_t master_key_hmac2[32] = { 0x11, 0x22 };
-#endif
-
 
 /* Key Handle generation function */
 static mbed_error_t generate_key_handle(uint8_t *key_handle, uint16_t *key_handle_len, const uint8_t *application_parameter, uint16_t application_parameter_len)
 {
         mbed_error_t errcode = MBED_ERROR_UNKNOWN;
         log_printf("[U2F_FIDO] %s\n", __func__);
-#ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 	/* Sanity check */
 	if((key_handle == NULL) || (key_handle_len == NULL)){
         errcode = MBED_ERROR_INVPARAM;
 		goto err;
 	}
 	/* Bad length */
-	if(*key_handle_len < KEY_HANDLE_SIZE){
+	if(*key_handle_len < FIDO_KEY_HANDLE_SIZE){
         errcode = MBED_ERROR_INVPARAM;
 		goto err;
 	}
-	*key_handle_len = KEY_HANDLE_SIZE;
+	*key_handle_len = FIDO_KEY_HANDLE_SIZE;
 	/* Get a 32 bytes random value */
 	uint8_t Nonce[KEY_HANDLE_NONCE_SIZE];
 	if (get_random((unsigned char*)&Nonce, KEY_HANDLE_NONCE_SIZE)){
@@ -93,11 +90,7 @@ static mbed_error_t generate_key_handle(uint8_t *key_handle, uint16_t *key_handl
             errcode = MBED_ERROR_UNKNOWN;
 	    goto err;
 	}
-#else
-        /* Ask the smart application to derive our Key Handle (using the physical token) */
-        /* FIXME: implement the callback */
-        #error "Callback for key handle derivation unimplemented yet"
-#endif
+        
         errcode = MBED_ERROR_NONE;
 err:
 	return errcode;
@@ -108,14 +101,14 @@ static mbed_error_t check_key_handle(const uint8_t *key_handle, uint16_t key_han
 {
         mbed_error_t errcode = MBED_ERROR_UNKNOWN;
         log_printf("[U2F_FIDO] %s\n", __func__);
-#ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
+
 	/* Sanity check */
 	if (key_handle == NULL) {
         errcode = MBED_ERROR_INVPARAM;
 		goto err;
 	}
 	/* Bad length */
-	if(key_handle_len < KEY_HANDLE_SIZE){
+	if(key_handle_len < FIDO_KEY_HANDLE_SIZE){
         errcode = MBED_ERROR_INVPARAM;
 		goto err;
 	}
@@ -141,11 +134,6 @@ static mbed_error_t check_key_handle(const uint8_t *key_handle, uint16_t key_han
         errcode = MBED_ERROR_UNKNOWN;
 		goto err;
 	}
-#else
-        /* Ask the smart application to check our Key Handle (using the physical token) */
-        /* FIXME: implement the callback */
-        #error "Callback for key handle check unimplemented yet"
-#endif
 
        errcode = MBED_ERROR_NONE;
 err:
@@ -162,11 +150,11 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
                 errcode = MBED_ERROR_INVPARAM;
 		goto err;
 	}
-	if(key_handle_len != KEY_HANDLE_SIZE){
+	if(key_handle_len != FIDO_KEY_HANDLE_SIZE){
                 errcode = MBED_ERROR_INVPARAM;
 		goto err;
 	}
-	if(*priv_key_len < PRIV_KEY_SIZE){
+	if(*priv_key_len < FIDO_PRIV_KEY_SIZE){
                 errcode = MBED_ERROR_INVPARAM;
 		goto err;
 	}
@@ -175,7 +163,7 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
                 errcode = MBED_ERROR_INVCREDENCIALS;
 		goto err;
 	}
-	(*priv_key_len) = PRIV_KEY_SIZE;
+	(*priv_key_len) = FIDO_PRIV_KEY_SIZE;
 	/* We generate our private key  */
 	hmac_context hmac_ctx;
 	uint32_t hmac_len = (*priv_key_len);
@@ -183,7 +171,7 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
         errcode = MBED_ERROR_UNKNOWN;
 		goto err;
 	}
-	hmac_update(&hmac_ctx, key_handle, KEY_HANDLE_SIZE);
+	hmac_update(&hmac_ctx, key_handle, FIDO_KEY_HANDLE_SIZE);
 	hmac_finalize(&hmac_ctx, priv_key, &hmac_len);
 	if(hmac_len != 32){
         errcode = MBED_ERROR_UNKNOWN;
@@ -214,7 +202,11 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
 err:
 	return errcode;
 }
-
+#else /* !UNSAFE_LOCAL_KEY_HANDLE_GENERATION */
+extern cb_fido_register_t callback_fido_register;
+extern cb_fido_authenticate_t callback_fido_authenticate;
+#endif
+/****************************************************************************************/
 
 /*
  * Format a raw ECDSA signature to ASN.1 as specified in ANSI X9.62.
@@ -242,7 +234,7 @@ static mbed_error_t format_ECDSA_signature_ansi_x962(const uint8_t *raw_ECDSA_si
 	 */
         mbed_error_t errcode = MBED_ERROR_UNKNOWN;
 	/* Sanity check on raw signature length: it should be 2 256-bit big numbers (64 bytes) */
-	if(siglen != (SIG_R_SIZE + SIG_S_SIZE)){
+	if(siglen != (FIDO_SIG_R_SIZE + FIDO_SIG_S_SIZE)){
                 errcode = MBED_ERROR_INVPARAM;
 		goto err;
 	}
@@ -250,7 +242,7 @@ static mbed_error_t format_ECDSA_signature_ansi_x962(const uint8_t *raw_ECDSA_si
 	const uint8_t *r = raw_ECDSA_signature;
 	const uint8_t *s = raw_ECDSA_signature + (siglen / 2);
 	/* Compute our final length */
-	uint16_t out_len = 2 /* SEQUENCE TL */ + 2 /* BIGNUM TL */ + SIG_R_SIZE + 2 /* BIGNUM TL */+ SIG_S_SIZE; /* = 70 byes minimum size */
+	uint16_t out_len = 2 /* SEQUENCE TL */ + 2 /* BIGNUM TL */ + FIDO_SIG_R_SIZE + 2 /* BIGNUM TL */+ FIDO_SIG_S_SIZE; /* = 70 byes minimum size */
 	if(r[0] & 0x80){ /* Check MSB of r, add prepending 0x00 if necessary */
 		out_len++;
 	}
@@ -275,32 +267,32 @@ static mbed_error_t format_ECDSA_signature_ansi_x962(const uint8_t *raw_ECDSA_si
 	formatted_ECDSA_signature[offset] = ASN1_INTEGER_TAG; /* ASN.1 INTEGER for r */
 	offset += 1;
 	if(r[0] & 0x80){
-		formatted_ECDSA_signature[offset] = SIG_R_SIZE + 1;
+		formatted_ECDSA_signature[offset] = FIDO_SIG_R_SIZE + 1;
 		offset += 1;
 		formatted_ECDSA_signature[offset] = 0x00;
 		offset += 1;
 	}
 	else{
-		formatted_ECDSA_signature[offset] = SIG_R_SIZE;
+		formatted_ECDSA_signature[offset] = FIDO_SIG_R_SIZE;
 		offset += 1;
 	}
-	memcpy(&formatted_ECDSA_signature[offset], r, SIG_R_SIZE);
-	offset += SIG_R_SIZE;
+	memcpy(&formatted_ECDSA_signature[offset], r, FIDO_SIG_R_SIZE);
+	offset += FIDO_SIG_R_SIZE;
 	/* Encode s */
 	formatted_ECDSA_signature[offset] = ASN1_INTEGER_TAG; /* ASN.1 INTEGER for s */
 	offset += 1;
 	if(s[0] & 0x80){
-		formatted_ECDSA_signature[offset] = SIG_S_SIZE + 1;
+		formatted_ECDSA_signature[offset] = FIDO_SIG_S_SIZE + 1;
 		offset += 1;
 		formatted_ECDSA_signature[offset] = 0x00;
 		offset += 1;
 	}
 	else{
-		formatted_ECDSA_signature[offset] = SIG_S_SIZE;
+		formatted_ECDSA_signature[offset] = FIDO_SIG_S_SIZE;
 		offset += 1;
 	}
-	memcpy(&formatted_ECDSA_signature[offset], s, SIG_S_SIZE);
-	offset += SIG_S_SIZE;
+	memcpy(&formatted_ECDSA_signature[offset], s, FIDO_SIG_S_SIZE);
+	offset += FIDO_SIG_S_SIZE;
 
 	/* Sanity check */
 	if(offset > (*formatted_ECDSA_signature_len)){
@@ -315,7 +307,7 @@ err:
 /* FIXME: properly handle the counter FIXME */
 /* XXX: For now we use a simple global counter in SRAM for tests */
 static volatile uint32_t fido_global_counter = 0;
-static mbed_error_t get_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[APPLICATION_PARAMETER_SIZE], uint32_t *counter)
+static mbed_error_t get_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], uint32_t *counter)
 {
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
     if((application_parameter == NULL) || (counter == NULL)){
@@ -330,7 +322,7 @@ err:
     return errcode;
 }
 
-static mbed_error_t increment_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[APPLICATION_PARAMETER_SIZE])
+static mbed_error_t increment_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE])
 {
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
     
@@ -349,24 +341,24 @@ static int u2f_fido_version(uint8_t u2f_param __attribute__((unused)), const uin
 	int error;
 
 	if((len_out == NULL) || (resp == NULL)){
-		error = WRONG_LENGTH;
+		error = FIDO_WRONG_LENGTH;
 		goto err_init;
 	}
 	/* We do not expect any data in this command */
 	if(len_in != 0){
-		error = WRONG_LENGTH;
+		error = FIDO_WRONG_LENGTH;
 		goto err;
 	}
 	/* Sanity check on the available output size */
 	if(*len_out < (sizeof(u2f_fido_version_str) - 1)){
-		error = WRONG_LENGTH;
+		error = FIDO_WRONG_LENGTH;
 		goto err;
 	}
 	/* We are asked to send the version */
 	*len_out = (sizeof(u2f_fido_version_str) - 1);
 	memcpy(resp, u2f_fido_version_str, sizeof(u2f_fido_version_str) - 1);
 
-	return NO_ERROR;
+	return FIDO_NO_ERROR;
 err:
 	*len_out = 0;
 err_init:
@@ -378,8 +370,8 @@ err_init:
  *    challenge_parameter (32) | application_parameter (32)
  */
 typedef struct __attribute__((packed)) {
-	uint8_t challenge_parameter[CHALLENGE_PARAMETER_SIZE];
-	uint8_t application_parameter[APPLICATION_PARAMETER_SIZE];
+	uint8_t challenge_parameter[FIDO_CHALLENGE_PARAMETER_SIZE];
+	uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE];
 } register_msg;
 
 static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const uint8_t * msg, uint16_t len_in, uint8_t *resp, uint16_t *len_out)
@@ -389,7 +381,7 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 	log_printf("[U2F_FIDO] REGISTER called\n");
 
 	if((len_out == NULL) || (resp == NULL) || (msg == NULL)){
-		error = WRONG_LENGTH;
+		error = FIDO_WRONG_LENGTH;
 		goto err_init;
 	}
 	/* Sanity check on the inputs
@@ -397,37 +389,50 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 	 *   challenge_parameter (32) | application_parameter (32)
 	 */
 	if(len_in != sizeof(register_msg)){
-		error = WRONG_LENGTH;
+		error = FIDO_WRONG_LENGTH;
 		goto err;
 	}
 	/* We always ask for user presence in all the cases */
 	if(enforce_user_presence(3)){
                 log_printf("[U2F_FIDO] user presence check failed\n");
-		error = REQUIRE_TEST_USER_PRESENCE;
+		error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 		goto err;
 	}
 
 	/* Generate a Key Handle and a key pair */
-	uint8_t key_handle[KEY_HANDLE_SIZE] = { 0 };
-	uint16_t key_handle_len = KEY_HANDLE_SIZE;
-	uint8_t priv_key_buff[PRIV_KEY_SIZE] = { 0 };
-	uint16_t priv_key_buff_len = PRIV_KEY_SIZE;
+	uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] = { 0 };
+	uint16_t key_handle_len = FIDO_KEY_HANDLE_SIZE;
+	uint8_t priv_key_buff[FIDO_PRIV_KEY_SIZE] = { 0 };
+	uint16_t priv_key_buff_len = FIDO_PRIV_KEY_SIZE;
 	ec_priv_key priv_key;
 	ec_pub_key pub_key;
 	/* Generate Key Handle and private key */
+#ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 	if (generate_key_handle(key_handle, &key_handle_len, in_msg->application_parameter, sizeof(in_msg->application_parameter))) {
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
 
 	if(generate_ECDSA_priv_key(key_handle, key_handle_len, priv_key_buff, &priv_key_buff_len, in_msg->application_parameter, sizeof(in_msg->application_parameter)) != MBED_ERROR_NONE){
                 log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
-	if(priv_key_buff_len != PRIV_KEY_SIZE){
+#else
+	if(callback_fido_register == NULL){
+                log_printf("[U2F FIDO] error in FIDO callback REGISTER (to the backend)\n");
+		error = FIDO_INVALID_KEY_HANDLE;
+		goto err;
+	}
+	if(callback_fido_register(in_msg->application_parameter, sizeof(in_msg->application_parameter), key_handle, &key_handle_len, priv_key_buff, &priv_key_buff_len)){
+                log_printf("[U2F FIDO] error in FIDO callback REGISTER (to the backend)\n");
+		error = FIDO_INVALID_KEY_HANDLE;
+		goto err;
+	}
+#endif
+	if(priv_key_buff_len != FIDO_PRIV_KEY_SIZE){
                 log_printf("[U2F FIDO] invalid ECDSA priv key size\n");
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
 
@@ -438,7 +443,7 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 	the_curve_const_parameters = ec_get_curve_params_by_type(SECP256R1);
         /* Get out if getting the parameters went wrong */
         if (the_curve_const_parameters == NULL) {
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
         /* Now map the curve parameters to our libecc internal representation */
@@ -448,81 +453,81 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 	/* Now compute our public key */
 	ecdsa_init_pub_key(&pub_key, &priv_key);
 	/* Extract x and y from our public key in buffers */
-	uint8_t pubkey_x_y[PUB_KEY_X_SIZE + PUB_KEY_Y_SIZE] = { 0 };
+	uint8_t pubkey_x_y[FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE] = { 0 };
 	/* Unique affine equivalent representation */
 	prj_pt_export_to_aff_buf(&(pub_key.y), (uint8_t*)&pubkey_x_y, sizeof(pubkey_x_y));
 	/* Import attestation key pair */
 	ec_key_pair attestation_key_pair;
 	/* Sanity check: pub key buffer must be in uncompressed form */
-	if((sizeof(fido_attestation_pubkey) != (PUB_KEY_X_SIZE + PUB_KEY_Y_SIZE + 1)) || (fido_attestation_pubkey[0] != ASN1_UNCOMPRESSED_POINT_TAG)){
-		error = INVALID_KEY_HANDLE;
+	if((sizeof(fido_attestation_pubkey) != (FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE + 1)) || (fido_attestation_pubkey[0] != ASN1_UNCOMPRESSED_POINT_TAG)){
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
 	/* Import the attestation private key and the public key */
 	/* Sanity check for th eprivate key */
-	if(sizeof(fido_attestation_privkey) != PRIV_KEY_SIZE){
-		error = INVALID_KEY_HANDLE;
+	if(sizeof(fido_attestation_privkey) != FIDO_PRIV_KEY_SIZE){
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
 	ec_priv_key_import_from_buf(&(attestation_key_pair.priv_key), &curve_params, (const uint8_t*)&fido_attestation_privkey, sizeof(fido_attestation_privkey), ECDSA);
-	uint8_t fido_attestation_pubkey_prj[PUB_KEY_X_SIZE + PUB_KEY_Y_SIZE + PUB_KEY_Z_SIZE] = { 0 };
-	memcpy(fido_attestation_pubkey_prj, &fido_attestation_pubkey[1], (PUB_KEY_X_SIZE + PUB_KEY_Y_SIZE));
+	uint8_t fido_attestation_pubkey_prj[FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE + FIDO_PUB_KEY_Z_SIZE] = { 0 };
+	memcpy(fido_attestation_pubkey_prj, &fido_attestation_pubkey[1], (FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE));
 	fido_attestation_pubkey_prj[sizeof(fido_attestation_pubkey_prj) - 1] = 0x01; /* Z coordinate to 1 */
 	if(ec_pub_key_import_from_buf(&(attestation_key_pair.pub_key), &curve_params, (const uint8_t*)&fido_attestation_pubkey_prj[0], sizeof(fido_attestation_pubkey_prj), ECDSA)){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
 	/* Sign 0x00 | application_parameter | challenge_parameter | key_handle | pub_key */
 	struct ec_sign_context sig_ctx;
         if(ec_sign_init(&sig_ctx, &attestation_key_pair, ECDSA, SHA256)){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
 
 	uint8_t reserved = 0x00;
         if(ec_sign_update(&sig_ctx, (const uint8_t*)&reserved, 1)){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
 	if(ec_sign_update(&sig_ctx, (const uint8_t*)&(in_msg->application_parameter), sizeof(in_msg->application_parameter))){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
 	if(ec_sign_update(&sig_ctx, (const uint8_t*)&(in_msg->challenge_parameter), sizeof(in_msg->challenge_parameter))){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
-	if(ec_sign_update(&sig_ctx, (const uint8_t*)key_handle, KEY_HANDLE_SIZE)){
-		error = INVALID_KEY_HANDLE;
+	if(ec_sign_update(&sig_ctx, (const uint8_t*)key_handle, FIDO_KEY_HANDLE_SIZE)){
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
 	uint8_t uncompressed_point = ASN1_UNCOMPRESSED_POINT_TAG;
 	if(ec_sign_update(&sig_ctx, (const uint8_t*)&uncompressed_point, 1)){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
-	if(ec_sign_update(&sig_ctx, (const uint8_t*)&pubkey_x_y[0], PUB_KEY_X_SIZE)){
-		error = INVALID_KEY_HANDLE;
+	if(ec_sign_update(&sig_ctx, (const uint8_t*)&pubkey_x_y[0], FIDO_PUB_KEY_X_SIZE)){
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
-	if(ec_sign_update(&sig_ctx, (const uint8_t*)&pubkey_x_y[PUB_KEY_X_SIZE], PUB_KEY_Y_SIZE)){
-		error = INVALID_KEY_HANDLE;
+	if(ec_sign_update(&sig_ctx, (const uint8_t*)&pubkey_x_y[FIDO_PUB_KEY_X_SIZE], FIDO_PUB_KEY_Y_SIZE)){
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
 	/* Finalize signature and place it in the end of the response */
 	/* Get our ECDSA signature length */
 	uint8_t siglen;
-	uint8_t raw_ECDSA_signature[SIG_R_SIZE + SIG_S_SIZE] = { 0 };
+	uint8_t raw_ECDSA_signature[FIDO_SIG_R_SIZE + FIDO_SIG_S_SIZE] = { 0 };
         if(ec_get_sig_len(&curve_params, ECDSA, SHA256, &siglen)){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
-	if(siglen != (SIG_R_SIZE + SIG_S_SIZE)){
-		error = INVALID_KEY_HANDLE;
+	if(siglen != (FIDO_SIG_R_SIZE + FIDO_SIG_S_SIZE)){
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
         if(ec_sign_finalize(&sig_ctx, (uint8_t*)&raw_ECDSA_signature, sizeof(raw_ECDSA_signature))){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
 	log_printf("[U2F_FIDO] REGISTER: ECDSA signature performed ...\n");
@@ -531,18 +536,18 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 	uint8_t formatted_ECDSA_signature[72] = { 0 };
 	uint16_t formatted_ECDSA_signature_len = sizeof(formatted_ECDSA_signature);
 	if(format_ECDSA_signature_ansi_x962(raw_ECDSA_signature, siglen, formatted_ECDSA_signature, &formatted_ECDSA_signature_len)){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
 	/* Begin to format our output
  	 *    0x05 | user_pub_key (65) | key_handle_len (1) | key_handle (size key_handle_len) | fido_attestation_cert | signature (71-73 per standard, actually 70-72)
 	 */
-	uint16_t output_size = 1 /* reserved = 0x05 */ + (PUB_KEY_X_SIZE + PUB_KEY_Y_SIZE + 1) /* user_pub_key */ \
-			     + 1 /* key_handle_len */+ KEY_HANDLE_SIZE /* key_handle */ + sizeof(fido_attestation_cert) /* fido_attestation_cert */ \
+	uint16_t output_size = 1 /* reserved = 0x05 */ + (FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE + 1) /* user_pub_key */ \
+			     + 1 /* key_handle_len */+ FIDO_KEY_HANDLE_SIZE /* key_handle */ + sizeof(fido_attestation_cert) /* fido_attestation_cert */ \
 			     + formatted_ECDSA_signature_len /* signature */;
 	/* Sanity check on the available output size */
 	if((*len_out) < output_size){
-		error = WRONG_LENGTH;
+		error = FIDO_WRONG_LENGTH;
 		goto err;
 	}
 	*len_out = output_size;
@@ -551,26 +556,26 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 	offset += 1;
 	resp[offset] = ASN1_UNCOMPRESSED_POINT_TAG; /* Uncompressed point */
 	offset += 1;
-	local_memcpy(&resp[offset], &pubkey_x_y[0], PUB_KEY_X_SIZE);
-	offset += PUB_KEY_X_SIZE;
-	local_memcpy(&resp[offset], &pubkey_x_y[PUB_KEY_X_SIZE], PUB_KEY_Y_SIZE);
-	offset += PUB_KEY_Y_SIZE;
-	resp[offset] = KEY_HANDLE_SIZE;
+	local_memcpy(&resp[offset], &pubkey_x_y[0], FIDO_PUB_KEY_X_SIZE);
+	offset += FIDO_PUB_KEY_X_SIZE;
+	local_memcpy(&resp[offset], &pubkey_x_y[FIDO_PUB_KEY_X_SIZE], FIDO_PUB_KEY_Y_SIZE);
+	offset += FIDO_PUB_KEY_Y_SIZE;
+	resp[offset] = FIDO_KEY_HANDLE_SIZE;
 	offset += 1;
-	local_memcpy(&resp[offset], &key_handle, KEY_HANDLE_SIZE);
-	offset += KEY_HANDLE_SIZE;
+	local_memcpy(&resp[offset], &key_handle, FIDO_KEY_HANDLE_SIZE);
+	offset += FIDO_KEY_HANDLE_SIZE;
 	local_memcpy(&resp[offset], &fido_attestation_cert, sizeof(fido_attestation_cert));
 	offset += sizeof(fido_attestation_cert);
 	local_memcpy(&resp[offset], &formatted_ECDSA_signature, formatted_ECDSA_signature_len);
 	offset += formatted_ECDSA_signature_len;
 	/* Sanity check */
 	if(offset > output_size){
-		error = WRONG_LENGTH;
+		error = FIDO_WRONG_LENGTH;
 		goto err;
 	}
 	log_printf("[U2F_FIDO] REGISTER: OK, returning %d bytes of data!\n", output_size);
 
-	return NO_ERROR;
+	return FIDO_NO_ERROR;
 err:
 	*len_out = 0;
 err_init:
@@ -585,10 +590,10 @@ err_init:
  * NOTE: the "control byte" is in fact the P1 of the APDU command and is not part of the encapsulated request.
  */
 typedef struct __attribute__((packed)) {
-	uint8_t challenge_parameter[CHALLENGE_PARAMETER_SIZE];
-	uint8_t application_parameter[APPLICATION_PARAMETER_SIZE];
+	uint8_t challenge_parameter[FIDO_CHALLENGE_PARAMETER_SIZE];
+	uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE];
 	uint8_t key_handle_len;
-	uint8_t key_handle[KEY_HANDLE_SIZE];
+	uint8_t key_handle[FIDO_KEY_HANDLE_SIZE];
 } authenticate_msg;
 
 
@@ -601,59 +606,81 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 	const authenticate_msg *in_msg = (const authenticate_msg*)msg;
 
 	if((len_out == NULL) || (resp == NULL) || (msg == NULL)){
-		error = WRONG_LENGTH;
+		error = FIDO_WRONG_LENGTH;
 		goto err_init;
 	}
         /* Sanity check on the length of our authenticate request */
 	if(len_in != sizeof(authenticate_msg)){
                 log_printf("[U2F FIDO] invalid message size\n");
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
 	/* Sanity check on the length of our key handle */
-	if(in_msg->key_handle_len != KEY_HANDLE_SIZE){
+	if(in_msg->key_handle_len != FIDO_KEY_HANDLE_SIZE){
                 log_printf("[U2F FIDO] invalid Key Handle size\n");
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
 
-	if(u2f_param != CHECK_ONLY){
-		/* We always ask for user presence except for CHECK_ONLY */
+	if(u2f_param != FIDO_CHECK_ONLY){
+		/* We always ask for user presence except for FIDO_CHECK_ONLY */
 		if(enforce_user_presence(3)){
                         log_printf("[U2F FIDO] user presence not enforce (it should be)\n");
-			error = REQUIRE_TEST_USER_PRESENCE;
+			error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 			goto err;
 		}
 	}
-
-	/* Try private key derivation */
-	uint8_t priv_key_buff[PRIV_KEY_SIZE] = { 0 };
-	uint16_t priv_key_buff_len = PRIV_KEY_SIZE;
-	if(generate_ECDSA_priv_key(in_msg->key_handle, in_msg->key_handle_len, priv_key_buff, &priv_key_buff_len, in_msg->application_parameter, sizeof(in_msg->application_parameter)) != MBED_ERROR_NONE){
-                log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
-		error = INVALID_KEY_HANDLE;
+	/* If this is a check only, this is it, check and leave! */
+	if(u2f_param == FIDO_CHECK_ONLY){
+#ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
+		if(check_key_handle(in_msg->key_handle, in_msg->key_handle_len, in_msg->application_parameter, sizeof(in_msg->application_parameter))){
+#else
+		if(callback_fido_authenticate == NULL){
+        	        log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
+			error = FIDO_INVALID_KEY_HANDLE;
+			goto err;
+		}
+		if(callback_fido_authenticate(in_msg->application_parameter, sizeof(in_msg->application_parameter), in_msg->key_handle, in_msg->key_handle_len, NULL, NULL, 1)){
+#endif
+                	error = FIDO_INVALID_KEY_HANDLE;
+			goto err;
+		}
+		/* NOTE: as per FIDO standard, this is in fact NOT an error but an success response for the FIDO_CHECK_ONLY case! */
+		log_printf("[U2F_FIDO] AUTHENTICATE: FIDO_CHECK_ONLY asked and verified to be OK\n");
+		error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 		goto err;
 	}
-	if(priv_key_buff_len != PRIV_KEY_SIZE){
+	/* This not a CHECK ONLY, we derive our private key and go on to AUTHENTICATE */
+	/* Try private key derivation */
+	uint8_t priv_key_buff[FIDO_PRIV_KEY_SIZE] = { 0 };
+	uint16_t priv_key_buff_len = FIDO_PRIV_KEY_SIZE;
+#ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
+	if(generate_ECDSA_priv_key(in_msg->key_handle, in_msg->key_handle_len, priv_key_buff, &priv_key_buff_len, in_msg->application_parameter, sizeof(in_msg->application_parameter)) != MBED_ERROR_NONE){
+#else
+	if(callback_fido_authenticate == NULL){
+                log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
+		error = FIDO_INVALID_KEY_HANDLE;
+		goto err;
+	}
+	if(callback_fido_authenticate(in_msg->application_parameter, sizeof(in_msg->application_parameter), in_msg->key_handle, in_msg->key_handle_len, priv_key_buff, &priv_key_buff_len, 0)){
+#endif
+                log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
+		error = FIDO_INVALID_KEY_HANDLE;
+		goto err;
+	}
+	if(priv_key_buff_len != FIDO_PRIV_KEY_SIZE){
                 log_printf("[U2F FIDO] error in private key length\n");
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
 	log_printf("[U2F_FIDO] AUTHENTICATE: key handle checked to be OK!\n");
-	/* If this was a check only, this is it, leave! */
-	if(u2f_param == CHECK_ONLY){
-		/* NOTE: as per FIDO standard, this is in fact NOT an error but an success response for the CHECK_ONLY case! */
-		log_printf("[U2F_FIDO] AUTHENTICATE: CHECK_ONLY asked and verified to be OK\n");
-		error = REQUIRE_TEST_USER_PRESENCE;
-		goto err;
-	}
 	/* libecc internal structure holding the curve parameters */
         const ec_str_params *the_curve_const_parameters;
         ec_params curve_params;
 	the_curve_const_parameters = ec_get_curve_params_by_type(SECP256R1);
         /* Get out if getting the parameters went wrong */
         if (the_curve_const_parameters == NULL) {
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
         /* Now map the curve parameters to our libecc internal representation */
@@ -675,59 +702,59 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 	struct ec_sign_context sig_ctx;
 
         if(ec_sign_init(&sig_ctx, &key_pair, ECDSA, SHA256)){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
         if(ec_sign_update(&sig_ctx, (const uint8_t*)&(in_msg->application_parameter), sizeof(in_msg->application_parameter))){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
 	uint8_t user_presence = 0x01; /* user presence is enforced */
         if(ec_sign_update(&sig_ctx, (const uint8_t*)&user_presence, 1)){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
         /* Get the current authentication counter value for the application parameter */
 	uint32_t counter;
         if(get_current_auth_counter(in_msg->application_parameter, &counter) != MBED_ERROR_NONE){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
         /* Increment the current authentication counter for the application parameter */
         if(increment_current_auth_counter(in_msg->application_parameter) != MBED_ERROR_NONE){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
 	uint8_t tmp[4] = { (counter >> 24) & 0xff, (counter >> 16) & 0xff, (counter >> 8)  & 0xff, (counter >> 0)  & 0xff };
 	if(ec_sign_update(&sig_ctx, (const uint8_t*)&tmp, 4)){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
         if(ec_sign_update(&sig_ctx, (const uint8_t*)&(in_msg->challenge_parameter), sizeof(in_msg->challenge_parameter))){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
 	/* Finalize signature and place it in the end of the response */
 	/* Get our ECDSA signature length */
 	uint8_t siglen;
-	uint8_t raw_ECDSA_signature[SIG_R_SIZE + SIG_S_SIZE] = { 0 };
+	uint8_t raw_ECDSA_signature[FIDO_SIG_R_SIZE + FIDO_SIG_S_SIZE] = { 0 };
         if(ec_get_sig_len(&curve_params, ECDSA, SHA256, &siglen)){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
-	if(siglen != (SIG_R_SIZE + SIG_S_SIZE)){
-		error = INVALID_KEY_HANDLE;
+	if(siglen != (FIDO_SIG_R_SIZE + FIDO_SIG_S_SIZE)){
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
         if(ec_sign_finalize(&sig_ctx, (uint8_t*)&raw_ECDSA_signature, sizeof(raw_ECDSA_signature))){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
 	/* Format the ECDSA signature to ANSI X9.62 */
 	uint8_t formatted_ECDSA_signature[72] = { 0 };
 	uint16_t formatted_ECDSA_signature_len = sizeof(formatted_ECDSA_signature);
 	if(format_ECDSA_signature_ansi_x962(raw_ECDSA_signature, siglen, formatted_ECDSA_signature, &formatted_ECDSA_signature_len)){
-		error = INVALID_KEY_HANDLE;
+		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
 	/* Begin to format our output
@@ -736,7 +763,7 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 	uint16_t output_size = 1 /* user_presence */ + 4 /* counter */ + formatted_ECDSA_signature_len /* signature */;
 	/* Sanity check on the available output size */
 	if((*len_out) < output_size){
-		error = WRONG_LENGTH;
+		error = FIDO_WRONG_LENGTH;
 		goto err;
 	}
 	*len_out = output_size;
@@ -752,11 +779,11 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 	offset += formatted_ECDSA_signature_len;
 	/* Sanity check */
 	if(offset > output_size){
-		error = WRONG_LENGTH;
+		error = FIDO_WRONG_LENGTH;
 		goto err;
 	}
 
-	return NO_ERROR;
+	return FIDO_NO_ERROR;
 err:
 	*len_out = 0;
 err_init:
@@ -772,15 +799,15 @@ mbed_error_t u2f_fido_handle_cmd(uint32_t metadata, const uint8_t *msg, uint16_t
 	uint8_t u2f_param = (metadata >> 8) & 0xff;
 
 	switch (u2f_ins) {
-		case U2F_VERSION: {
+		case FIDO_VERSION: {
 			error = u2f_fido_version(u2f_param, msg, len_in, resp, len_out);
 			break;
 		}
-		case U2F_REGISTER: {
+		case FIDO_REGISTER: {
 			error = u2f_fido_register(u2f_param, msg, len_in, resp, len_out);
 			break;
 		}
-		case U2F_AUTHENTICATE: {
+		case FIDO_AUTHENTICATE: {
 			error = u2f_fido_authenticate(u2f_param, msg, len_in, resp, len_out);
 			break;
 		}
