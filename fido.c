@@ -55,6 +55,7 @@ static const uint8_t master_key_hmac2[32] = { 0x11, 0x22 };
 static mbed_error_t generate_key_handle(uint8_t *key_handle, uint16_t *key_handle_len, const uint8_t *application_parameter, uint16_t application_parameter_len)
 {
         mbed_error_t errcode = MBED_ERROR_UNKNOWN;
+
         log_printf("[U2F_FIDO] %s\n", __func__);
 #ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 	/* Sanity check */
@@ -74,11 +75,19 @@ static mbed_error_t generate_key_handle(uint8_t *key_handle, uint16_t *key_handl
         errcode = MBED_ERROR_UNKNOWN;
 		goto err;
 	}
+        /* First compute the master key = SHA-256(key1 || key2) */
+        uint8_t master_key[32] = { 0 };
+        sha256_context sha256_ctx;
+        sha256_init(&sha256_ctx);
+        sha256_update(&sha256_ctx, master_key_hmac1, sizeof(master_key_hmac1));
+        sha256_update(&sha256_ctx, master_key_hmac2, sizeof(master_key_hmac2));
+        sha256_final(&sha256_ctx, master_key);
+        /* Compute key handle */
 	memcpy(key_handle, Nonce, KEY_HANDLE_NONCE_SIZE);
 	/* Now compute the hmac of the None with Key1 */
 	hmac_context hmac_ctx;
 	uint32_t hmac_len = 32;
-	if(hmac_init(&hmac_ctx, master_key_hmac1, sizeof(master_key_hmac1), SHA256)){
+	if(hmac_init(&hmac_ctx, master_key, sizeof(master_key), SHA256)){
         errcode = MBED_ERROR_UNKNOWN;
 		goto err;
 	}
@@ -119,11 +128,18 @@ static mbed_error_t check_key_handle(const uint8_t *key_handle, uint16_t key_han
         errcode = MBED_ERROR_INVPARAM;
 		goto err;
 	}
-	/* Compute the hmac of the Nonce with Key1 */
+        /* First compute the master key = SHA-256(key1 || key2) */
+        uint8_t master_key[32] = { 0 };
+        sha256_context sha256_ctx;
+        sha256_init(&sha256_ctx);
+        sha256_update(&sha256_ctx, master_key_hmac1, sizeof(master_key_hmac1));
+        sha256_update(&sha256_ctx, master_key_hmac2, sizeof(master_key_hmac2));
+        sha256_final(&sha256_ctx, master_key);
+	/* Compute the hmac of the Nonce with the master key */
 	hmac_context hmac_ctx;
         uint8_t hmac[SHA256_DIGEST_SIZE];
 	uint32_t hmac_len = sizeof(hmac);
-	if (hmac_init(&hmac_ctx, master_key_hmac1, sizeof(master_key_hmac1), SHA256)) {
+	if (hmac_init(&hmac_ctx, master_key, sizeof(master_key), SHA256)) {
         errcode = MBED_ERROR_UNKNOWN;
 		goto err;
 	}
@@ -176,10 +192,17 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
 		goto err;
 	}
 	(*priv_key_len) = PRIV_KEY_SIZE;
+        /* First compute the master key = SHA-256(key1 || key2) */
+        uint8_t master_key[32] = { 0 };
+        sha256_context sha256_ctx;
+        sha256_init(&sha256_ctx);
+        sha256_update(&sha256_ctx, master_key_hmac1, sizeof(master_key_hmac1));
+        sha256_update(&sha256_ctx, master_key_hmac2, sizeof(master_key_hmac2));
+        sha256_final(&sha256_ctx, master_key);
 	/* We generate our private key  */
 	hmac_context hmac_ctx;
 	uint32_t hmac_len = (*priv_key_len);
-	if(hmac_init(&hmac_ctx, master_key_hmac2, sizeof(master_key_hmac2), SHA256)){
+	if(hmac_init(&hmac_ctx, master_key, sizeof(master_key), SHA256)){
         errcode = MBED_ERROR_UNKNOWN;
 		goto err;
 	}
@@ -189,6 +212,7 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
         errcode = MBED_ERROR_UNKNOWN;
 		goto err;
 	}
+#if 0
 	/* We want to ensure that the private key is < q (the order of the curve) */
         /* libecc internal structure holding the curve parameters */
         const ec_str_params *the_curve_const_parameters;
@@ -209,7 +233,7 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
 	nn_mod(&pkey, &pkey, &(curve_params.ec_gen_order));
 	/* Export private key again in buffer */
 	nn_export_to_buf(priv_key, *priv_key_len, &pkey);
-
+#endif
         errcode = MBED_ERROR_NONE;
 err:
 	return errcode;
@@ -664,10 +688,11 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 	/* NOTE: we cheat here with libecc we do not need a proper public key to sign and we certainly do not
 	 * want to spend so much time in a costly scalar multiplication! This is why we make a minimum effort to
 	 * have our public key initialized ...
-	 * This kind of ugly, but well we know what we are doing! The signature operation, even if it takes
+	 * This is kind of ugly, but well we know what we are doing! The signature operation, even if it takes
 	 * a key pair as a parameter, does not need a public key per se.
 	 * This replaces the cleaner 'ecdsa_init_pub_key(&(key_pair.pub_key), &(key_pair.priv_key))' that would
-	 * take approximately 800ms, which is a shame ...
+	 * take approximately 800ms, which is a shame ... (in addition to potentially expose the private key
+         * to side-channels leakage).
 	 */
 	key_pair.pub_key.magic = PUB_KEY_MAGIC;
 	key_pair.pub_key.key_type = ECDSA;
