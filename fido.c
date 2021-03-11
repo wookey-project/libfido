@@ -99,7 +99,7 @@ static mbed_error_t generate_key_handle(uint8_t *key_handle, uint16_t *key_handl
             errcode = MBED_ERROR_UNKNOWN;
 	    goto err;
 	}
-        
+
         errcode = MBED_ERROR_NONE;
 err:
 	return errcode;
@@ -227,8 +227,11 @@ err:
 	return errcode;
 }
 #else /* !UNSAFE_LOCAL_KEY_HANDLE_GENERATION */
+/* just specify prototypes, set at link time */
+#if 0
 extern cb_fido_register_t callback_fido_register;
 extern cb_fido_authenticate_t callback_fido_authenticate;
+#endif
 #endif
 /****************************************************************************************/
 
@@ -340,7 +343,7 @@ static mbed_error_t get_current_auth_counter(__attribute__((unused)) const uint8
     }
 
     *counter = fido_global_counter;
-    
+
     errcode = MBED_ERROR_NONE;
 err:
     return errcode;
@@ -349,7 +352,7 @@ err:
 static mbed_error_t increment_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE])
 {
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
-    
+
     fido_global_counter++;
 
     errcode = MBED_ERROR_NONE;
@@ -443,11 +446,13 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 		goto err;
 	}
 #else
+#if 0
 	if(callback_fido_register == NULL){
                 log_printf("[U2F FIDO] error in FIDO callback REGISTER (to the backend)\n");
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
+#endif
 	if(callback_fido_register(in_msg->application_parameter, sizeof(in_msg->application_parameter), key_handle, &key_handle_len, priv_key_buff, &priv_key_buff_len)){
                 log_printf("[U2F FIDO] error in FIDO callback REGISTER (to the backend)\n");
 		error = FIDO_INVALID_KEY_HANDLE;
@@ -659,11 +664,13 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 #ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 		if(check_key_handle(in_msg->key_handle, in_msg->key_handle_len, in_msg->application_parameter, sizeof(in_msg->application_parameter))){
 #else
+#if 0
 		if(callback_fido_authenticate == NULL){
         	        log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
 			error = FIDO_INVALID_KEY_HANDLE;
 			goto err;
 		}
+#endif
 		if(callback_fido_authenticate(in_msg->application_parameter, sizeof(in_msg->application_parameter), in_msg->key_handle, in_msg->key_handle_len, NULL, NULL, 1)){
 #endif
                 	error = FIDO_INVALID_KEY_HANDLE;
@@ -681,11 +688,13 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 #ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 	if(generate_ECDSA_priv_key(in_msg->key_handle, in_msg->key_handle_len, priv_key_buff, &priv_key_buff_len, in_msg->application_parameter, sizeof(in_msg->application_parameter)) != MBED_ERROR_NONE){
 #else
+#if 0
 	if(callback_fido_authenticate == NULL){
                 log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
+#endif
 	if(callback_fido_authenticate(in_msg->application_parameter, sizeof(in_msg->application_parameter), in_msg->key_handle, in_msg->key_handle_len, priv_key_buff, &priv_key_buff_len, 0)){
 #endif
                 log_printf("[U2F FIDO] error while generate ECDSA priv key\n");

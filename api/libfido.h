@@ -49,8 +49,12 @@ mbed_error_t u2f_fido_handle_cmd(uint32_t metadata,
                                  const uint8_t * msg, uint16_t len_in,
                                  uint8_t *resp, uint16_t *len_out);
 
-/* Backend callbacks */
+/* Backend callbacks: statically linked, prototypes set here */
+int callback_fido_register(const uint8_t *app_data, uint16_t app_data_len, uint8_t *key_handle, uint16_t *key_handle_len, uint8_t *ecdsa_priv_key, uint16_t *ecdsa_priv_key_len);
+int callback_fido_authenticate(const uint8_t *app_data, uint16_t app_data_len, const uint8_t *key_handle, uint16_t key_handle_len, uint8_t *ecdsa_priv_key, uint16_t *ecdsa_priv_key_len, uint8_t check_only);
+#if 0
 typedef int (*cb_fido_register_t)(const uint8_t *app_data, uint16_t app_data_len, uint8_t *key_handle, uint16_t *key_handle_len, uint8_t *ecdsa_priv_key, uint16_t *ecdsa_priv_key_len);
 typedef int (*cb_fido_authenticate_t)(const uint8_t *app_data, uint16_t app_data_len, const uint8_t *key_handle, uint16_t key_handle_len, uint8_t *ecdsa_priv_key, uint16_t *ecdsa_priv_key_len, uint8_t check_only);
+#endif
 
 #endif/*!LIBFIDO_H_*/
