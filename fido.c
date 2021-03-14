@@ -4,9 +4,16 @@
 #include "libsig.h"
 #include "hmac.h"
 #include "fido.h"
+
+//#define UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 /* Include our private data */
 #include "AUTH/FIDO/attestation.der.h"
 #include "AUTH/FIDO/attestation_key.der.h"
+
+
+#ifndef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
+extern unsigned char fido_attestation_privkey[FIDO_PRIV_KEY_SIZE];
+#endif
 
 userpresence_request_cb_t cb_userpresence = NULL;
 
@@ -41,7 +48,6 @@ static int enforce_user_presence(uint32_t timeout __attribute__((unused)))
 }
 
 /************* UNSAFE_LOCAL_KEY_HANDLE_GENERATION ***********************/
-//#define UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 
 #ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 #define KEY_HANDLE_NONCE_SIZE 32
@@ -196,11 +202,11 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
 	}
 	hmac_update(&hmac_ctx, key_handle, FIDO_KEY_HANDLE_SIZE);
 	hmac_finalize(&hmac_ctx, priv_key, &hmac_len);
-	if(hmac_len != 32){
+	if(hmac_len != FIDO_PRIV_KEY_SIZE){
         errcode = MBED_ERROR_UNKNOWN;
 		goto err;
 	}
-#if 0
+#if 1
 	/* We want to ensure that the private key is < q (the order of the curve) */
         /* libecc internal structure holding the curve parameters */
         const ec_str_params *the_curve_const_parameters;
@@ -217,10 +223,19 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
 	/* Import the private key as NN */
 	nn pkey;
 	nn_init_from_buf(&pkey, priv_key, *priv_key_len);
+	if(nn_cmp(&pkey, &(curve_params.ec_gen_order)) > 0){
+printf("=========>!!!!! GREATER THAN Q\n");
+printf("====== XXXXXXXXXXXX==========\n");
+hexdump(priv_key, 32);
+printf("====== XXXXXXXXXXXX==========\n");
+
+	}
+#if 0
 	/* Compute our modulo */
 	nn_mod(&pkey, &pkey, &(curve_params.ec_gen_order));
 	/* Export private key again in buffer */
 	nn_export_to_buf(priv_key, *priv_key_len, &pkey);
+#endif
 #endif
         errcode = MBED_ERROR_NONE;
 err:
@@ -446,18 +461,15 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 		goto err;
 	}
 #else
-#if 0
-	if(callback_fido_register == NULL){
-                log_printf("[U2F FIDO] error in FIDO callback REGISTER (to the backend)\n");
-		error = FIDO_INVALID_KEY_HANDLE;
-		goto err;
-	}
-#endif
 	if(callback_fido_register(in_msg->application_parameter, sizeof(in_msg->application_parameter), key_handle, &key_handle_len, priv_key_buff, &priv_key_buff_len)){
                 log_printf("[U2F FIDO] error in FIDO callback REGISTER (to the backend)\n");
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
+printf("====== XXXXXXXXXXXX==========\n");
+hexdump(priv_key_buff, 32);
+printf("====== XXXXXXXXXXXX==========\n");
+
 #endif
 	if(priv_key_buff_len != FIDO_PRIV_KEY_SIZE){
                 log_printf("[U2F FIDO] invalid ECDSA priv key size\n");
@@ -664,13 +676,6 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 #ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 		if(check_key_handle(in_msg->key_handle, in_msg->key_handle_len, in_msg->application_parameter, sizeof(in_msg->application_parameter))){
 #else
-#if 0
-		if(callback_fido_authenticate == NULL){
-        	        log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
-			error = FIDO_INVALID_KEY_HANDLE;
-			goto err;
-		}
-#endif
 		if(callback_fido_authenticate(in_msg->application_parameter, sizeof(in_msg->application_parameter), in_msg->key_handle, in_msg->key_handle_len, NULL, NULL, 1)){
 #endif
                 	error = FIDO_INVALID_KEY_HANDLE;
@@ -688,19 +693,17 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 #ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 	if(generate_ECDSA_priv_key(in_msg->key_handle, in_msg->key_handle_len, priv_key_buff, &priv_key_buff_len, in_msg->application_parameter, sizeof(in_msg->application_parameter)) != MBED_ERROR_NONE){
 #else
-#if 0
-	if(callback_fido_authenticate == NULL){
-                log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
-		error = FIDO_INVALID_KEY_HANDLE;
-		goto err;
-	}
-#endif
 	if(callback_fido_authenticate(in_msg->application_parameter, sizeof(in_msg->application_parameter), in_msg->key_handle, in_msg->key_handle_len, priv_key_buff, &priv_key_buff_len, 0)){
 #endif
                 log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
+printf("====== XXXXXXXXXXXX==========\n");
+hexdump(priv_key_buff, 32);
+printf("====== XXXXXXXXXXXX==========\n");
+
+
 	if(priv_key_buff_len != FIDO_PRIV_KEY_SIZE){
                 log_printf("[U2F FIDO] error in private key length\n");
 		error = FIDO_INVALID_KEY_HANDLE;
