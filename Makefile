@@ -23,9 +23,15 @@ APP_BUILD_DIR = $(BUILD_DIR)/libs/$(LIB_NAME)
 ###################################################################
 
 CFLAGS += $(LIBS_CFLAGS)
-# libtoken needs libecc
+# libfido needs libecc
 CFLAGS += -I$(PROJ_FILES)/externals/libecc/src $(EXTERNAL_CFLAGS) $(LIBSIGN_CFLAGS)
 CFLAGS += -MMD -MP -O3
+# libfido needs private key access. This access should be declared voluntary in makefiles
+CFLAGS += -I$(PRIVATE_DIR)
+# libfido uses the specialized FIDO profile (adding specific dedicated AUTH commands)
+ifeq ($(CONFIG_PROJ_NAME),"u2f2")
+CFLAGS += -DFIDO_PROFILE
+endif
 
 #############################################################
 # About library sources
