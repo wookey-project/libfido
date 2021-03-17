@@ -497,13 +497,9 @@ printf("====== XXXXXXXXXXXX==========\n");
 	uint8_t pubkey_x_y[FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE] = { 0 };
 	/* Unique affine equivalent representation */
 	prj_pt_export_to_aff_buf(&(pub_key.y), (uint8_t*)&pubkey_x_y, sizeof(pubkey_x_y));
-	/* Import attestation key pair */
+	/* Import attestation private key for signing */
 	ec_key_pair attestation_key_pair;
-	/* Sanity check: pub key buffer must be in uncompressed form */
-	if((sizeof(fido_attestation_pubkey) != (FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE + 1)) || (fido_attestation_pubkey[0] != ASN1_UNCOMPRESSED_POINT_TAG)){
-		error = FIDO_INVALID_KEY_HANDLE;
-		goto err;
-	}
+
 	/* Import the attestation private key and the public key */
 	/* Sanity check for th eprivate key */
 	if(sizeof(fido_attestation_privkey) != FIDO_PRIV_KEY_SIZE){
@@ -511,13 +507,13 @@ printf("====== XXXXXXXXXXXX==========\n");
 		goto err;
 	}
 	ec_priv_key_import_from_buf(&(attestation_key_pair.priv_key), &curve_params, (const uint8_t*)&fido_attestation_privkey, sizeof(fido_attestation_privkey), ECDSA);
-	uint8_t fido_attestation_pubkey_prj[FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE + FIDO_PUB_KEY_Z_SIZE] = { 0 };
-	memcpy(fido_attestation_pubkey_prj, &fido_attestation_pubkey[1], (FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE));
-	fido_attestation_pubkey_prj[sizeof(fido_attestation_pubkey_prj) - 1] = 0x01; /* Z coordinate to 1 */
-	if(ec_pub_key_import_from_buf(&(attestation_key_pair.pub_key), &curve_params, (const uint8_t*)&fido_attestation_pubkey_prj[0], sizeof(fido_attestation_pubkey_prj), ECDSA)){
-		error = FIDO_INVALID_KEY_HANDLE;
-		goto err;
-	}
+	/* NOTE: we cheat here with libecc we do not need a proper public key to sign and we certainly do not
+	 * want to spend so much time in importing an unnecessary curve point with costly check operations!
+         * This is why we make a minimum effort to have our public key initialized ...
+	 */
+	attestation_key_pair.pub_key.magic = PUB_KEY_MAGIC;
+	attestation_key_pair.pub_key.key_type = ECDSA;
+
 	/* Sign 0x00 | application_parameter | challenge_parameter | key_handle | pub_key */
 	struct ec_sign_context sig_ctx;
         if(ec_sign_init(&sig_ctx, &attestation_key_pair, ECDSA, SHA256)){
