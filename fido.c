@@ -4,6 +4,7 @@
 #include "libsig.h"
 #include "hmac.h"
 #include "fido.h"
+#include "libtoken.h"
 
 //#define UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 /* Include our private data */
@@ -207,23 +208,20 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
 		goto err;
 	}
 #if 1
-	/* We want to ensure that the private key is < q (the order of the curve) */
-        /* libecc internal structure holding the curve parameters */
-        const ec_str_params *the_curve_const_parameters;
-        ec_params curve_params;
-        the_curve_const_parameters = ec_get_curve_params_by_type(SECP256R1);
-        /* Get out if getting the parameters went wrong */
-        if (the_curve_const_parameters == NULL) {
-            log_printf("[U2F_FIDO] error while building curve const params\n");
-            errcode = MBED_ERROR_UNKNOWN;
-            goto err;
+	/* Load curve parameters if not done */
+        ec_params *curve_params;
+        if(load_curve_parameters(SECP256R1, curve_params)){
+        errcode = MBED_ERROR_UNKNOWN;
+                goto err;
         }
-        /* Now map the curve parameters to our libecc internal representation */
-        import_params(&curve_params, the_curve_const_parameters);
+        if(curve_params == NULL){
+        errcode = MBED_ERROR_UNKNOWN;
+                goto err;
+        }
 	/* Import the private key as NN */
 	nn pkey;
 	nn_init_from_buf(&pkey, priv_key, *priv_key_len);
-	if(nn_cmp(&pkey, &(curve_params.ec_gen_order)) > 0){
+	if(nn_cmp(&pkey, &(curve_params->ec_gen_order)) > 0){
 printf("=========>!!!!! GREATER THAN Q\n");
 printf("====== XXXXXXXXXXXX==========\n");
 hexdump(priv_key, 32);
@@ -440,7 +438,16 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 		error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 		goto err;
 	}
-
+        /* Load SECP256R1 curve parameters once and for all if not loaded */
+        ec_params *curve_params;
+        if(load_curve_parameters(SECP256R1, &curve_params)){
+            error = FIDO_INVALID_KEY_HANDLE;
+	    goto err;
+        }
+	if(curve_params == NULL){
+            error = FIDO_INVALID_KEY_HANDLE;
+	    goto err;
+        }
 	/* Generate a Key Handle and a key pair */
 	uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] = { 0 };
 	uint16_t key_handle_len = FIDO_KEY_HANDLE_SIZE;
@@ -478,19 +485,8 @@ printf("====== XXXXXXXXXXXX==========\n");
 	}
 
 	log_printf("[U2F_FIDO] REGISTER: key handle generated ...\n");
-	/* libecc internal structure holding the curve parameters */
-        const ec_str_params *the_curve_const_parameters;
-        ec_params curve_params;
-	the_curve_const_parameters = ec_get_curve_params_by_type(SECP256R1);
-        /* Get out if getting the parameters went wrong */
-        if (the_curve_const_parameters == NULL) {
-		error = FIDO_INVALID_KEY_HANDLE;
-                goto err;
-        }
-        /* Now map the curve parameters to our libecc internal representation */
-        import_params(&curve_params, the_curve_const_parameters);
 	/* Import private key from buffer */
-	ec_priv_key_import_from_buf(&priv_key, &curve_params, priv_key_buff, priv_key_buff_len, ECDSA);
+	ec_priv_key_import_from_buf(&priv_key, curve_params, priv_key_buff, priv_key_buff_len, ECDSA);
 	/* Now compute our public key */
 	ecdsa_init_pub_key(&pub_key, &priv_key);
 	/* Extract x and y from our public key in buffers */
@@ -506,7 +502,7 @@ printf("====== XXXXXXXXXXXX==========\n");
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
-	ec_priv_key_import_from_buf(&(attestation_key_pair.priv_key), &curve_params, (const uint8_t*)&fido_attestation_privkey, sizeof(fido_attestation_privkey), ECDSA);
+	ec_priv_key_import_from_buf(&(attestation_key_pair.priv_key), curve_params, (const uint8_t*)&fido_attestation_privkey, sizeof(fido_attestation_privkey), ECDSA);
 	/* NOTE: we cheat here with libecc we do not need a proper public key to sign and we certainly do not
 	 * want to spend so much time in importing an unnecessary curve point with costly check operations!
          * This is why we make a minimum effort to have our public key initialized ...
@@ -555,7 +551,7 @@ printf("====== XXXXXXXXXXXX==========\n");
 	/* Get our ECDSA signature length */
 	uint8_t siglen;
 	uint8_t raw_ECDSA_signature[FIDO_SIG_R_SIZE + FIDO_SIG_S_SIZE] = { 0 };
-        if(ec_get_sig_len(&curve_params, ECDSA, SHA256, &siglen)){
+        if(ec_get_sig_len(curve_params, ECDSA, SHA256, &siglen)){
 		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
@@ -682,6 +678,16 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 		error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 		goto err;
 	}
+        /* Load curve parameters if not done */
+        ec_params *curve_params;
+        if(load_curve_parameters(SECP256R1, &curve_params)){
+            error = FIDO_INVALID_KEY_HANDLE;
+	    goto err;
+        }
+	if(curve_params == NULL){
+            error = FIDO_INVALID_KEY_HANDLE;
+	    goto err;
+        }
 	/* This not a CHECK ONLY, we derive our private key and go on to AUTHENTICATE */
 	/* Try private key derivation */
 	uint8_t priv_key_buff[FIDO_PRIV_KEY_SIZE] = { 0 };
@@ -706,20 +712,9 @@ printf("====== XXXXXXXXXXXX==========\n");
 		goto err;
 	}
 	log_printf("[U2F_FIDO] AUTHENTICATE: key handle checked to be OK!\n");
-	/* libecc internal structure holding the curve parameters */
-        const ec_str_params *the_curve_const_parameters;
-        ec_params curve_params;
-	the_curve_const_parameters = ec_get_curve_params_by_type(SECP256R1);
-        /* Get out if getting the parameters went wrong */
-        if (the_curve_const_parameters == NULL) {
-		error = FIDO_INVALID_KEY_HANDLE;
-                goto err;
-        }
-        /* Now map the curve parameters to our libecc internal representation */
-        import_params(&curve_params, the_curve_const_parameters);
 	/* Get our key pair */
 	ec_key_pair key_pair;
-	ec_priv_key_import_from_buf(&(key_pair.priv_key), &curve_params, priv_key_buff, priv_key_buff_len, ECDSA);
+	ec_priv_key_import_from_buf(&(key_pair.priv_key), curve_params, priv_key_buff, priv_key_buff_len, ECDSA);
 	/* NOTE: we cheat here with libecc we do not need a proper public key to sign and we certainly do not
 	 * want to spend so much time in a costly scalar multiplication! This is why we make a minimum effort to
 	 * have our public key initialized ...
@@ -771,7 +766,7 @@ printf("====== XXXXXXXXXXXX==========\n");
 	/* Get our ECDSA signature length */
 	uint8_t siglen;
 	uint8_t raw_ECDSA_signature[FIDO_SIG_R_SIZE + FIDO_SIG_S_SIZE] = { 0 };
-        if(ec_get_sig_len(&curve_params, ECDSA, SHA256, &siglen)){
+        if(ec_get_sig_len(curve_params, ECDSA, SHA256, &siglen)){
 		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
