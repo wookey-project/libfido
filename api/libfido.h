@@ -41,7 +41,7 @@
  * wait for user presence event (typically a button) and return TRUE if
  * button pushed. Otherwhise return FALSE.
  */
-typedef bool (*userpresence_request_cb_t)(uint16_t timeout_ms);
+typedef bool (*userpresence_request_cb_t)(uint16_t timeout_ms, uint8_t *application_parameter);
 
 mbed_error_t u2f_fido_initialize(userpresence_request_cb_t userpresence_cb);
 
