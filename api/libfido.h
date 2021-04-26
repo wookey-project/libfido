@@ -37,11 +37,17 @@
 /* Our private key size */
 #define FIDO_PRIV_KEY_SIZE                           32
 
+
+typedef enum {
+    U2F_FIDO_REGISTER     = 0,
+    U2F_FIDO_AUTHENTICATE = 1,
+} u2f_fido_action;
+
 /*
  * wait for user presence event (typically a button) and return TRUE if
  * button pushed. Otherwhise return FALSE.
  */
-typedef bool (*userpresence_request_cb_t)(uint16_t timeout_ms, uint8_t *application_parameter);
+typedef bool (*userpresence_request_cb_t)(uint16_t timeout_ms, uint8_t *application_parameter, u2f_fido_action action);
 
 mbed_error_t u2f_fido_initialize(userpresence_request_cb_t userpresence_cb);
 

@@ -26,7 +26,7 @@ mbed_error_t u2f_fido_initialize(userpresence_request_cb_t userpresence_cb)
 }
 
 /* Primitive to enforce user presence */
-static int enforce_user_presence(uint32_t timeout __attribute__((unused)), uint8_t *application_parameter __attribute__((unused)))
+static int enforce_user_presence(uint32_t timeout __attribute__((unused)), uint8_t *application_parameter __attribute__((unused)), u2f_fido_action action __attribute__((unused)))
 {
 #ifdef CONFIG_USR_LIB_FIDO_EMULATE_USERPRESENCE
 	log_printf("[U2F_FIDO] user presence emulated!\n");
@@ -40,7 +40,7 @@ static int enforce_user_presence(uint32_t timeout __attribute__((unused)), uint8
 	/* Test for user presence with timeout in seconds */
 	// TODO via backend return platform_enforce_user_presence(timeout);
     if (cb_userpresence != NULL) {
-        if (cb_userpresence(timeout*1000, application_parameter) == true) {
+        if (cb_userpresence(timeout*1000, application_parameter, action) == true) {
             return 0;
         }
     }
@@ -433,7 +433,7 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 		goto err;
 	}
 	/* We always ask for user presence in all the cases */
-	if(enforce_user_presence(3, (uint8_t*)&in_msg->application_parameter[0])) {
+	if(enforce_user_presence(3, (uint8_t*)&in_msg->application_parameter[0], U2F_FIDO_REGISTER)) {
                 log_printf("[U2F_FIDO] user presence check failed\n");
 		error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 		goto err;
@@ -657,7 +657,7 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 
 	if(u2f_param != FIDO_CHECK_ONLY){
 		/* We always ask for user presence except for FIDO_CHECK_ONLY */
-		if(enforce_user_presence(3, (uint8_t*)&in_msg->application_parameter[0])){
+		if(enforce_user_presence(3, (uint8_t*)&in_msg->application_parameter[0], U2F_FIDO_AUTHENTICATE)){
                         log_printf("[U2F FIDO] user presence not enforce (it should be)\n");
 			error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 			goto err;
