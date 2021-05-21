@@ -344,29 +344,30 @@ err:
 	return errcode;
 }
 
-/* FIXME: properly handle the counter FIXME */
-/* XXX: For now we use a simple global counter in SRAM for tests */
-static volatile uint32_t fido_global_counter = 0;
+
+
 static mbed_error_t get_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], uint32_t *counter)
 {
+    printf("get auth counter!\n");
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
     if((application_parameter == NULL) || (counter == NULL)){
         errcode = MBED_ERROR_INVPARAM;
         goto err;
     }
 
-    *counter = fido_global_counter;
+    *counter = fido_get_auth_counter();
 
     errcode = MBED_ERROR_NONE;
 err:
     return errcode;
 }
 
-static mbed_error_t increment_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE])
+static mbed_error_t increment_current_auth_counter(const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE])
 {
+    printf("inc auth counter!\n");
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
 
-    fido_global_counter++;
+    fido_inc_auth_counter(&application_parameter[0], FIDO_APPLICATION_PARAMETER_SIZE);
 
     errcode = MBED_ERROR_NONE;
 
@@ -473,9 +474,12 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
+#if CONFIG_USR_LIB_FIDO_DEBUG
 printf("====== XXXXXXXXXXXX==========\n");
 hexdump(priv_key_buff, 32);
 printf("====== XXXXXXXXXXXX==========\n");
+#endif
+
 
 #endif
 	if(priv_key_buff_len != FIDO_PRIV_KEY_SIZE){
@@ -701,9 +705,11 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
+#if CONFIG_USR_LIB_FIDO_DEBUG
 printf("====== XXXXXXXXXXXX==========\n");
 hexdump(priv_key_buff, 32);
 printf("====== XXXXXXXXXXXX==========\n");
+#endif
 
 
 	if(priv_key_buff_len != FIDO_PRIV_KEY_SIZE){
