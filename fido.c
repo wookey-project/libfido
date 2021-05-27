@@ -4,6 +4,7 @@
 #include "libsig.h"
 #include "hmac.h"
 #include "fido.h"
+#include "libtoken.h"
 
 //#define UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 /* Include our private data */
@@ -25,7 +26,7 @@ mbed_error_t u2f_fido_initialize(userpresence_request_cb_t userpresence_cb)
 }
 
 /* Primitive to enforce user presence */
-static int enforce_user_presence(uint32_t timeout __attribute__((unused)))
+static int enforce_user_presence(uint32_t timeout __attribute__((unused)), uint8_t *application_parameter __attribute__((unused)), u2f_fido_action action __attribute__((unused)))
 {
 #ifdef CONFIG_USR_LIB_FIDO_EMULATE_USERPRESENCE
 	log_printf("[U2F_FIDO] user presence emulated!\n");
@@ -39,7 +40,7 @@ static int enforce_user_presence(uint32_t timeout __attribute__((unused)))
 	/* Test for user presence with timeout in seconds */
 	// TODO via backend return platform_enforce_user_presence(timeout);
     if (cb_userpresence != NULL) {
-        if (cb_userpresence(timeout*1000) == true) {
+        if (cb_userpresence(timeout*1000, application_parameter, action) == true) {
             return 0;
         }
     }
@@ -207,23 +208,20 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
 		goto err;
 	}
 #if 1
-	/* We want to ensure that the private key is < q (the order of the curve) */
-        /* libecc internal structure holding the curve parameters */
-        const ec_str_params *the_curve_const_parameters;
-        ec_params curve_params;
-        the_curve_const_parameters = ec_get_curve_params_by_type(SECP256R1);
-        /* Get out if getting the parameters went wrong */
-        if (the_curve_const_parameters == NULL) {
-            log_printf("[U2F_FIDO] error while building curve const params\n");
-            errcode = MBED_ERROR_UNKNOWN;
-            goto err;
+	/* Load curve parameters if not done */
+        ec_params *curve_params;
+        if(load_curve_parameters(SECP256R1, curve_params)){
+        errcode = MBED_ERROR_UNKNOWN;
+                goto err;
         }
-        /* Now map the curve parameters to our libecc internal representation */
-        import_params(&curve_params, the_curve_const_parameters);
+        if(curve_params == NULL){
+        errcode = MBED_ERROR_UNKNOWN;
+                goto err;
+        }
 	/* Import the private key as NN */
 	nn pkey;
 	nn_init_from_buf(&pkey, priv_key, *priv_key_len);
-	if(nn_cmp(&pkey, &(curve_params.ec_gen_order)) > 0){
+	if(nn_cmp(&pkey, &(curve_params->ec_gen_order)) > 0){
 printf("=========>!!!!! GREATER THAN Q\n");
 printf("====== XXXXXXXXXXXX==========\n");
 hexdump(priv_key, 32);
@@ -346,29 +344,30 @@ err:
 	return errcode;
 }
 
-/* FIXME: properly handle the counter FIXME */
-/* XXX: For now we use a simple global counter in SRAM for tests */
-static volatile uint32_t fido_global_counter = 0;
+
+
 static mbed_error_t get_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], uint32_t *counter)
 {
+    printf("get auth counter!\n");
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
     if((application_parameter == NULL) || (counter == NULL)){
         errcode = MBED_ERROR_INVPARAM;
         goto err;
     }
 
-    *counter = fido_global_counter;
+    *counter = fido_get_auth_counter();
 
     errcode = MBED_ERROR_NONE;
 err:
     return errcode;
 }
 
-static mbed_error_t increment_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE])
+static mbed_error_t increment_current_auth_counter(const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE])
 {
+    printf("inc auth counter!\n");
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
 
-    fido_global_counter++;
+    fido_inc_auth_counter(&application_parameter[0], FIDO_APPLICATION_PARAMETER_SIZE);
 
     errcode = MBED_ERROR_NONE;
 
@@ -435,12 +434,21 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 		goto err;
 	}
 	/* We always ask for user presence in all the cases */
-	if(enforce_user_presence(3)){
+	if(enforce_user_presence(3, (uint8_t*)&in_msg->application_parameter[0], U2F_FIDO_REGISTER)) {
                 log_printf("[U2F_FIDO] user presence check failed\n");
 		error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 		goto err;
 	}
-
+        /* Load SECP256R1 curve parameters once and for all if not loaded */
+        ec_params *curve_params;
+        if(load_curve_parameters(SECP256R1, &curve_params)){
+            error = FIDO_INVALID_KEY_HANDLE;
+	    goto err;
+        }
+	if(curve_params == NULL){
+            error = FIDO_INVALID_KEY_HANDLE;
+	    goto err;
+        }
 	/* Generate a Key Handle and a key pair */
 	uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] = { 0 };
 	uint16_t key_handle_len = FIDO_KEY_HANDLE_SIZE;
@@ -466,9 +474,12 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
+#if CONFIG_USR_LIB_FIDO_DEBUG
 printf("====== XXXXXXXXXXXX==========\n");
 hexdump(priv_key_buff, 32);
 printf("====== XXXXXXXXXXXX==========\n");
+#endif
+
 
 #endif
 	if(priv_key_buff_len != FIDO_PRIV_KEY_SIZE){
@@ -478,46 +489,31 @@ printf("====== XXXXXXXXXXXX==========\n");
 	}
 
 	log_printf("[U2F_FIDO] REGISTER: key handle generated ...\n");
-	/* libecc internal structure holding the curve parameters */
-        const ec_str_params *the_curve_const_parameters;
-        ec_params curve_params;
-	the_curve_const_parameters = ec_get_curve_params_by_type(SECP256R1);
-        /* Get out if getting the parameters went wrong */
-        if (the_curve_const_parameters == NULL) {
-		error = FIDO_INVALID_KEY_HANDLE;
-                goto err;
-        }
-        /* Now map the curve parameters to our libecc internal representation */
-        import_params(&curve_params, the_curve_const_parameters);
 	/* Import private key from buffer */
-	ec_priv_key_import_from_buf(&priv_key, &curve_params, priv_key_buff, priv_key_buff_len, ECDSA);
+	ec_priv_key_import_from_buf(&priv_key, curve_params, priv_key_buff, priv_key_buff_len, ECDSA);
 	/* Now compute our public key */
 	ecdsa_init_pub_key(&pub_key, &priv_key);
 	/* Extract x and y from our public key in buffers */
 	uint8_t pubkey_x_y[FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE] = { 0 };
 	/* Unique affine equivalent representation */
 	prj_pt_export_to_aff_buf(&(pub_key.y), (uint8_t*)&pubkey_x_y, sizeof(pubkey_x_y));
-	/* Import attestation key pair */
+	/* Import attestation private key for signing */
 	ec_key_pair attestation_key_pair;
-	/* Sanity check: pub key buffer must be in uncompressed form */
-	if((sizeof(fido_attestation_pubkey) != (FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE + 1)) || (fido_attestation_pubkey[0] != ASN1_UNCOMPRESSED_POINT_TAG)){
-		error = FIDO_INVALID_KEY_HANDLE;
-		goto err;
-	}
+
 	/* Import the attestation private key and the public key */
 	/* Sanity check for th eprivate key */
 	if(sizeof(fido_attestation_privkey) != FIDO_PRIV_KEY_SIZE){
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
-	ec_priv_key_import_from_buf(&(attestation_key_pair.priv_key), &curve_params, (const uint8_t*)&fido_attestation_privkey, sizeof(fido_attestation_privkey), ECDSA);
-	uint8_t fido_attestation_pubkey_prj[FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE + FIDO_PUB_KEY_Z_SIZE] = { 0 };
-	memcpy(fido_attestation_pubkey_prj, &fido_attestation_pubkey[1], (FIDO_PUB_KEY_X_SIZE + FIDO_PUB_KEY_Y_SIZE));
-	fido_attestation_pubkey_prj[sizeof(fido_attestation_pubkey_prj) - 1] = 0x01; /* Z coordinate to 1 */
-	if(ec_pub_key_import_from_buf(&(attestation_key_pair.pub_key), &curve_params, (const uint8_t*)&fido_attestation_pubkey_prj[0], sizeof(fido_attestation_pubkey_prj), ECDSA)){
-		error = FIDO_INVALID_KEY_HANDLE;
-		goto err;
-	}
+	ec_priv_key_import_from_buf(&(attestation_key_pair.priv_key), curve_params, (const uint8_t*)&fido_attestation_privkey, sizeof(fido_attestation_privkey), ECDSA);
+	/* NOTE: we cheat here with libecc we do not need a proper public key to sign and we certainly do not
+	 * want to spend so much time in importing an unnecessary curve point with costly check operations!
+         * This is why we make a minimum effort to have our public key initialized ...
+	 */
+	attestation_key_pair.pub_key.magic = PUB_KEY_MAGIC;
+	attestation_key_pair.pub_key.key_type = ECDSA;
+
 	/* Sign 0x00 | application_parameter | challenge_parameter | key_handle | pub_key */
 	struct ec_sign_context sig_ctx;
         if(ec_sign_init(&sig_ctx, &attestation_key_pair, ECDSA, SHA256)){
@@ -559,7 +555,7 @@ printf("====== XXXXXXXXXXXX==========\n");
 	/* Get our ECDSA signature length */
 	uint8_t siglen;
 	uint8_t raw_ECDSA_signature[FIDO_SIG_R_SIZE + FIDO_SIG_S_SIZE] = { 0 };
-        if(ec_get_sig_len(&curve_params, ECDSA, SHA256, &siglen)){
+        if(ec_get_sig_len(curve_params, ECDSA, SHA256, &siglen)){
 		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
@@ -665,7 +661,7 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 
 	if(u2f_param != FIDO_CHECK_ONLY){
 		/* We always ask for user presence except for FIDO_CHECK_ONLY */
-		if(enforce_user_presence(3)){
+		if(enforce_user_presence(3, (uint8_t*)&in_msg->application_parameter[0], U2F_FIDO_AUTHENTICATE)){
                         log_printf("[U2F FIDO] user presence not enforce (it should be)\n");
 			error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 			goto err;
@@ -686,6 +682,16 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 		error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 		goto err;
 	}
+        /* Load curve parameters if not done */
+        ec_params *curve_params;
+        if(load_curve_parameters(SECP256R1, &curve_params)){
+            error = FIDO_INVALID_KEY_HANDLE;
+	    goto err;
+        }
+	if(curve_params == NULL){
+            error = FIDO_INVALID_KEY_HANDLE;
+	    goto err;
+        }
 	/* This not a CHECK ONLY, we derive our private key and go on to AUTHENTICATE */
 	/* Try private key derivation */
 	uint8_t priv_key_buff[FIDO_PRIV_KEY_SIZE] = { 0 };
@@ -699,9 +705,11 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
+#if CONFIG_USR_LIB_FIDO_DEBUG
 printf("====== XXXXXXXXXXXX==========\n");
 hexdump(priv_key_buff, 32);
 printf("====== XXXXXXXXXXXX==========\n");
+#endif
 
 
 	if(priv_key_buff_len != FIDO_PRIV_KEY_SIZE){
@@ -710,20 +718,9 @@ printf("====== XXXXXXXXXXXX==========\n");
 		goto err;
 	}
 	log_printf("[U2F_FIDO] AUTHENTICATE: key handle checked to be OK!\n");
-	/* libecc internal structure holding the curve parameters */
-        const ec_str_params *the_curve_const_parameters;
-        ec_params curve_params;
-	the_curve_const_parameters = ec_get_curve_params_by_type(SECP256R1);
-        /* Get out if getting the parameters went wrong */
-        if (the_curve_const_parameters == NULL) {
-		error = FIDO_INVALID_KEY_HANDLE;
-                goto err;
-        }
-        /* Now map the curve parameters to our libecc internal representation */
-        import_params(&curve_params, the_curve_const_parameters);
 	/* Get our key pair */
 	ec_key_pair key_pair;
-	ec_priv_key_import_from_buf(&(key_pair.priv_key), &curve_params, priv_key_buff, priv_key_buff_len, ECDSA);
+	ec_priv_key_import_from_buf(&(key_pair.priv_key), curve_params, priv_key_buff, priv_key_buff_len, ECDSA);
 	/* NOTE: we cheat here with libecc we do not need a proper public key to sign and we certainly do not
 	 * want to spend so much time in a costly scalar multiplication! This is why we make a minimum effort to
 	 * have our public key initialized ...
@@ -775,7 +772,7 @@ printf("====== XXXXXXXXXXXX==========\n");
 	/* Get our ECDSA signature length */
 	uint8_t siglen;
 	uint8_t raw_ECDSA_signature[FIDO_SIG_R_SIZE + FIDO_SIG_S_SIZE] = { 0 };
-        if(ec_get_sig_len(&curve_params, ECDSA, SHA256, &siglen)){
+        if(ec_get_sig_len(curve_params, ECDSA, SHA256, &siglen)){
 		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
