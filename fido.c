@@ -16,13 +16,33 @@
 extern unsigned char fido_attestation_privkey[FIDO_PRIV_KEY_SIZE];
 #endif
 
-userpresence_request_cb_t cb_userpresence = NULL;
+fido_event_request_cb_t cb_fido_event = NULL;
 
-mbed_error_t u2f_fido_initialize(userpresence_request_cb_t userpresence_cb)
+mbed_error_t u2f_fido_initialize(fido_event_request_cb_t fido_event_cb)
 {
     log_printf("[U2F_FIDO] declaring userpresence & wink backend callbacks\n");
-    cb_userpresence = userpresence_cb;
+    cb_fido_event = fido_event_cb;
     return MBED_ERROR_NONE;
+}
+
+/* Primitive to enforce check only */
+static int enforce_check_only(const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE] __attribute__((unused)), const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] __attribute__((unused)))
+{
+#ifdef CONFIG_USR_LIB_FIDO_EMULATE_USERPRESENCE
+	log_printf("[U2F_FIDO] user presence emulated!\n");
+# if USR_LIB_FIDO_EMULATE_NOUSER
+	return 1;
+# else
+    return 0;
+# endif
+#else
+    if (cb_fido_event != NULL) {
+        if (cb_fido_event(0, application_parameter, key_handle, U2F_FIDO_CHECK_ONLY) == true) {
+            return 0;
+        }
+    }
+    return 1;
+#endif
 }
 
 /* Primitive to enforce user presence */
@@ -39,8 +59,8 @@ static int enforce_user_presence(uint32_t timeout __attribute__((unused)), const
 	log_printf("[U2F_FIDO] Wait for user presence with timeout %d seconds\n", timeout);
 	/* Test for user presence with timeout in seconds */
 	// TODO via backend return platform_enforce_user_presence(timeout);
-    if (cb_userpresence != NULL) {
-        if (cb_userpresence(timeout*1000, application_parameter, key_handle, action) == true) {
+    if (cb_fido_event != NULL) {
+        if (cb_fido_event(timeout*1000, application_parameter, key_handle, action) == true) {
             return 0;
         }
     }
@@ -669,6 +689,11 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 	}
 	/* If this is a check only, this is it, check and leave! */
 	if(u2f_param == FIDO_CHECK_ONLY){
+		if(enforce_check_only((uint8_t*)&in_msg->application_parameter[0], in_msg->key_handle)){
+                        log_printf("[U2F FIDO] check only backend error\n");
+			error = FIDO_INVALID_KEY_HANDLE;
+			goto err;                       
+		}
 #ifdef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 		if(check_key_handle(in_msg->key_handle, in_msg->key_handle_len, in_msg->application_parameter, sizeof(in_msg->application_parameter))){
 #else

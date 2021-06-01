@@ -41,6 +41,7 @@
 typedef enum {
     U2F_FIDO_REGISTER     = 0,
     U2F_FIDO_AUTHENTICATE = 1,
+    U2F_FIDO_CHECK_ONLY   = 2,
 } u2f_fido_action;
 
 /*
@@ -54,9 +55,9 @@ void fido_inc_auth_counter(const uint8_t *appid, uint16_t appid_len);
  * wait for user presence event (typically a button) and return TRUE if
  * button pushed. Otherwhise return FALSE.
  */
-typedef bool (*userpresence_request_cb_t)(uint16_t timeout_ms, const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE], u2f_fido_action action);
+typedef bool (*fido_event_request_cb_t)(uint16_t timeout_ms, const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE], u2f_fido_action action);
 
-mbed_error_t u2f_fido_initialize(userpresence_request_cb_t userpresence_cb);
+mbed_error_t u2f_fido_initialize(fido_event_request_cb_t fido_event_cb);
 
 mbed_error_t u2f_fido_handle_cmd(uint32_t metadata,
                                  const uint8_t * msg, uint16_t len_in,
