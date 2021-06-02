@@ -17,11 +17,14 @@ extern unsigned char fido_attestation_privkey[FIDO_PRIV_KEY_SIZE];
 #endif
 
 fido_event_request_cb_t cb_fido_event = NULL;
+/* FIXME: no need for a timeout here, so change the callback type */
+fido_event_request_cb_t cb_fido_post_crypto_event = NULL;
 
-mbed_error_t u2f_fido_initialize(fido_event_request_cb_t fido_event_cb)
+mbed_error_t u2f_fido_initialize(fido_event_request_cb_t fido_event_cb, fido_event_request_cb_t fido_post_crypto_event_cb)
 {
     log_printf("[U2F_FIDO] declaring userpresence & wink backend callbacks\n");
     cb_fido_event = fido_event_cb;
+    cb_fido_post_crypto_event = fido_post_crypto_event_cb;
     return MBED_ERROR_NONE;
 }
 
@@ -66,6 +69,19 @@ static int enforce_user_presence(uint32_t timeout __attribute__((unused)), const
     }
     return 1;
 #endif
+}
+
+/* Primitive to enforce end of crypto */
+static int enforce_post_crypto(const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE] __attribute__((unused)), const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] __attribute__((unused)), u2f_fido_action action __attribute__((unused)))
+{
+	log_printf("[U2F_FIDO] Post crypto event\n");
+    if (cb_fido_post_crypto_event != NULL) {
+        if (cb_fido_post_crypto_event(0, application_parameter, key_handle, action) == true) {
+            return 0;
+        }
+    }
+    return 1;
+
 }
 
 /************* UNSAFE_LOCAL_KEY_HANDLE_GENERATION ***********************/
@@ -509,6 +525,12 @@ printf("====== XXXXXXXXXXXX==========\n");
 	}
 
 	log_printf("[U2F_FIDO] REGISTER: key handle generated ...\n");
+	/* Call our post crypto callback with the proper key handle */
+	if(enforce_post_crypto((uint8_t*)&in_msg->application_parameter[0], key_handle, U2F_FIDO_REGISTER)) {
+	        log_printf("[U2F FIDO] error in FIDO callback REGISTER (post crypto callback)\n");
+		error = FIDO_INVALID_KEY_HANDLE;
+		goto err;	
+ 	}
 	/* Import private key from buffer */
 	ec_priv_key_import_from_buf(&priv_key, curve_params, priv_key_buff, priv_key_buff_len, ECDSA);
 	/* Now compute our public key */
