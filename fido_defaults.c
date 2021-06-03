@@ -10,6 +10,6 @@ static volatile uint32_t fido_global_counter = 0;
     return fido_global_counter;
 }
 
-__attribute__((weak)) void fido_inc_auth_counter(const uint8_t *appid __attribute__((unused)), uint16_t appid_len __attribute__((unused))) {
+__attribute__((weak)) void fido_inc_auth_counter(void) {
     fido_global_counter++;
 }

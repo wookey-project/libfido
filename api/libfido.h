@@ -49,7 +49,7 @@ typedef enum {
  */
 uint32_t fido_get_auth_counter(void);
 
-void fido_inc_auth_counter(const uint8_t *appid, uint16_t appid_len);
+void fido_inc_auth_counter(void);
 
 /*
  * wait for user presence event (typically a button) and return TRUE if

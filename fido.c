@@ -382,7 +382,7 @@ err:
 
 
 
-static mbed_error_t get_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], uint32_t *counter)
+static mbed_error_t get_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], __attribute__((unused)) const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE], uint32_t *counter)
 {
     printf("get auth counter!\n");
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
@@ -398,12 +398,12 @@ err:
     return errcode;
 }
 
-static mbed_error_t increment_current_auth_counter(const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE])
+static mbed_error_t increment_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], __attribute__((unused)) const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE])
 {
     printf("inc auth counter!\n");
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
 
-    fido_inc_auth_counter(&application_parameter[0], FIDO_APPLICATION_PARAMETER_SIZE);
+    fido_inc_auth_counter();
 
     errcode = MBED_ERROR_NONE;
 
@@ -797,12 +797,12 @@ printf("====== XXXXXXXXXXXX==========\n");
         }
         /* Get the current authentication counter value for the application parameter */
 	uint32_t counter;
-        if(get_current_auth_counter(in_msg->application_parameter, &counter) != MBED_ERROR_NONE){
+        if(get_current_auth_counter(in_msg->application_parameter, in_msg->key_handle, &counter) != MBED_ERROR_NONE){
 		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
         /* Increment the current authentication counter for the application parameter */
-        if(increment_current_auth_counter(in_msg->application_parameter) != MBED_ERROR_NONE){
+        if(increment_current_auth_counter(in_msg->application_parameter, in_msg->key_handle) != MBED_ERROR_NONE){
 		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
