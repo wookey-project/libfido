@@ -10,7 +10,7 @@ if USR_LIB_FIDO
 menu "FIDO options"
 
 config USR_LIB_FIDO_DEBUG
-  int "HID stack debug informations level"
+  int "FIDO/U2F stack debug informations level"
   default 0
   range 0 2
   ---help---

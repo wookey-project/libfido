@@ -243,7 +243,6 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
         errcode = MBED_ERROR_UNKNOWN;
 		goto err;
 	}
-#if 1
 	/* Load curve parameters if not done */
         ec_params *curve_params;
         if(load_curve_parameters(SECP256R1, curve_params)){
@@ -257,31 +256,15 @@ static mbed_error_t generate_ECDSA_priv_key(const uint8_t *key_handle, uint16_t 
 	/* Import the private key as NN */
 	nn pkey;
 	nn_init_from_buf(&pkey, priv_key, *priv_key_len);
-	if(nn_cmp(&pkey, &(curve_params->ec_gen_order)) > 0){
-printf("=========>!!!!! GREATER THAN Q\n");
-printf("====== XXXXXXXXXXXX==========\n");
-hexdump(priv_key, 32);
-printf("====== XXXXXXXXXXXX==========\n");
 
-	}
-#if 0
-	/* Compute our modulo */
-	nn_mod(&pkey, &pkey, &(curve_params.ec_gen_order));
-	/* Export private key again in buffer */
-	nn_export_to_buf(priv_key, *priv_key_len, &pkey);
-#endif
-#endif
         errcode = MBED_ERROR_NONE;
 err:
 	return errcode;
 }
 #else /* !UNSAFE_LOCAL_KEY_HANDLE_GENERATION */
-/* just specify prototypes, set at link time */
-#if 0
-extern cb_fido_register_t callback_fido_register;
-extern cb_fido_authenticate_t callback_fido_authenticate;
+/* Prototypes are set at link time */
 #endif
-#endif
+
 /****************************************************************************************/
 
 /*
@@ -384,7 +367,7 @@ err:
 
 static mbed_error_t get_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], __attribute__((unused)) const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE], uint32_t *counter)
 {
-    printf("get auth counter!\n");
+    log_printf("get auth counter!\n");
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
     if((application_parameter == NULL) || (counter == NULL)){
         errcode = MBED_ERROR_INVPARAM;
@@ -400,7 +383,7 @@ err:
 
 static mbed_error_t increment_current_auth_counter(__attribute__((unused)) const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], __attribute__((unused)) const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE])
 {
-    printf("inc auth counter!\n");
+    log_printf("inc auth counter!\n");
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
 
     fido_inc_auth_counter();
@@ -498,7 +481,6 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
-
 	if(generate_ECDSA_priv_key(key_handle, key_handle_len, priv_key_buff, &priv_key_buff_len, in_msg->application_parameter, sizeof(in_msg->application_parameter)) != MBED_ERROR_NONE){
                 log_printf("[U2F FIDO] error while generate ECDSA priv key\n");
 		error = FIDO_INVALID_KEY_HANDLE;
@@ -510,13 +492,6 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
-#if CONFIG_USR_LIB_FIDO_DEBUG
-printf("====== XXXXXXXXXXXX==========\n");
-hexdump(priv_key_buff, 32);
-printf("====== XXXXXXXXXXXX==========\n");
-#endif
-
-
 #endif
 	if(priv_key_buff_len != FIDO_PRIV_KEY_SIZE){
                 log_printf("[U2F FIDO] invalid ECDSA priv key size\n");
@@ -609,6 +584,7 @@ printf("====== XXXXXXXXXXXX==========\n");
 		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
+
 	log_printf("[U2F_FIDO] REGISTER: ECDSA signature performed ...\n");
 
 	/* Format the ECDSA signature to ANSI X9.62 */
@@ -704,7 +680,7 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 	if(u2f_param != FIDO_CHECK_ONLY){
 		/* We always ask for user presence except for FIDO_CHECK_ONLY */
 		if(enforce_user_presence(3, (uint8_t*)&in_msg->application_parameter[0], in_msg->key_handle, U2F_FIDO_AUTHENTICATE)){
-                        log_printf("[U2F FIDO] user presence not enforce (it should be)\n");
+                        log_printf("[U2F FIDO] user presence not enforced (it should be)\n");
 			error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 			goto err;
 		}
@@ -752,13 +728,6 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 		error = FIDO_INVALID_KEY_HANDLE;
 		goto err;
 	}
-#if CONFIG_USR_LIB_FIDO_DEBUG
-printf("====== XXXXXXXXXXXX==========\n");
-hexdump(priv_key_buff, 32);
-printf("====== XXXXXXXXXXXX==========\n");
-#endif
-
-
 	if(priv_key_buff_len != FIDO_PRIV_KEY_SIZE){
                 log_printf("[U2F FIDO] error in private key length\n");
 		error = FIDO_INVALID_KEY_HANDLE;
@@ -872,33 +841,40 @@ err_init:
 }
 
 /* This is the callback entrypoint from the lower layer */
-mbed_error_t u2f_fido_handle_cmd(uint32_t metadata, const uint8_t *msg, uint16_t len_in, uint8_t *resp, uint16_t *len_out)
+mbed_error_t u2f_fido_handle_cmd(uint32_t metadata, const uint8_t *msg, uint16_t len_in, uint8_t *resp, uint16_t *len_out, int *fido_error)
 {
-	mbed_error_t error = MBED_ERROR_UNSUPORTED_CMD;
+	mbed_error_t error = MBED_ERROR_NONE;
 
 	uint8_t u2f_ins   = metadata & 0xff;
 	uint8_t u2f_param = (metadata >> 8) & 0xff;
 
+
+        if(fido_error == NULL){
+            error = MBED_ERROR_INVPARAM;
+            goto err;
+        }
 	switch (u2f_ins) {
 		case FIDO_VERSION: {
-			error = u2f_fido_version(u2f_param, msg, len_in, resp, len_out);
+			*fido_error = u2f_fido_version(u2f_param, msg, len_in, resp, len_out);
 			break;
 		}
 		case FIDO_REGISTER: {
-			error = u2f_fido_register(u2f_param, msg, len_in, resp, len_out);
+			*fido_error = u2f_fido_register(u2f_param, msg, len_in, resp, len_out);
 			break;
 		}
 		case FIDO_AUTHENTICATE: {
-			error = u2f_fido_authenticate(u2f_param, msg, len_in, resp, len_out);
+			*fido_error = u2f_fido_authenticate(u2f_param, msg, len_in, resp, len_out);
 			break;
 		}
 		default: {
 			/* This should not happen thanks to the lower layer */
                     /* defaulting to UNKNOWN_CMD */
+	                error = MBED_ERROR_UNSUPORTED_CMD;
 			break;
 		}
 	}
 
+err:
 	return error;
 }
 
