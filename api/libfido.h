@@ -55,7 +55,7 @@ void fido_inc_auth_counter(void);
  * wait for user presence event (typically a button) and return TRUE if
  * button pushed. Otherwhise return FALSE.
  */
-typedef bool (*fido_event_request_cb_t)(uint16_t timeout_ms, const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE], u2f_fido_action action);
+typedef bool (*fido_event_request_cb_t)(uint16_t timeout_ms, const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE], const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE], u2f_fido_action action, bool *existing);
 
 
 mbed_error_t u2f_fido_initialize(fido_event_request_cb_t fido_event_cb, fido_event_request_cb_t fido_post_crypto_event_cb);

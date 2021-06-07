@@ -40,7 +40,7 @@ static int enforce_check_only(const uint8_t application_parameter[FIDO_APPLICATI
 # endif
 #else
     if (cb_fido_event != NULL) {
-        if (cb_fido_event(0, application_parameter, key_handle, U2F_FIDO_CHECK_ONLY) == true) {
+        if (cb_fido_event(0, application_parameter, key_handle, U2F_FIDO_CHECK_ONLY, NULL) == true) {
             return 0;
         }
     }
@@ -49,7 +49,7 @@ static int enforce_check_only(const uint8_t application_parameter[FIDO_APPLICATI
 }
 
 /* Primitive to enforce user presence */
-static int enforce_user_presence(uint32_t timeout __attribute__((unused)), const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE] __attribute__((unused)), const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] __attribute__((unused)), u2f_fido_action action __attribute__((unused)))
+static int enforce_user_presence(uint32_t timeout __attribute__((unused)), const uint8_t application_parameter[FIDO_APPLICATION_PARAMETER_SIZE] __attribute__((unused)), const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] __attribute__((unused)), u2f_fido_action action __attribute__((unused)), bool *existing)
 {
 #ifdef CONFIG_USR_LIB_FIDO_EMULATE_USERPRESENCE
 	log_printf("[U2F_FIDO] user presence emulated!\n");
@@ -63,7 +63,7 @@ static int enforce_user_presence(uint32_t timeout __attribute__((unused)), const
 	/* Test for user presence with timeout in seconds */
 	// TODO via backend return platform_enforce_user_presence(timeout);
     if (cb_fido_event != NULL) {
-        if (cb_fido_event(timeout*1000, application_parameter, key_handle, action) == true) {
+        if (cb_fido_event(timeout*1000, application_parameter, key_handle, action, existing) == true) {
             return 0;
         }
     }
@@ -76,7 +76,7 @@ static int enforce_post_crypto(const uint8_t application_parameter[FIDO_APPLICAT
 {
 	log_printf("[U2F_FIDO] Post crypto event\n");
     if (cb_fido_post_crypto_event != NULL) {
-        if (cb_fido_post_crypto_event(0, application_parameter, key_handle, action) == true) {
+        if (cb_fido_post_crypto_event(0, application_parameter, key_handle, action, NULL) == true) {
             return 0;
         }
     }
@@ -453,7 +453,7 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 		goto err;
 	}
 	/* We always ask for user presence in all the cases */
-	if(enforce_user_presence(3, (uint8_t*)&in_msg->application_parameter[0], NULL, U2F_FIDO_REGISTER)) {
+	if(enforce_user_presence(3, (uint8_t*)&in_msg->application_parameter[0], NULL, U2F_FIDO_REGISTER, NULL)) {
                 log_printf("[U2F_FIDO] user presence check failed\n");
 		error = FIDO_REQUIRE_TEST_USER_PRESENCE;
 		goto err;
@@ -679,9 +679,15 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 
 	if(u2f_param != FIDO_CHECK_ONLY){
 		/* We always ask for user presence except for FIDO_CHECK_ONLY */
-		if(enforce_user_presence(3, (uint8_t*)&in_msg->application_parameter[0], in_msg->key_handle, U2F_FIDO_AUTHENTICATE)){
-                        log_printf("[U2F FIDO] user presence not enforced (it should be)\n");
+		bool existing = false;
+		if(enforce_user_presence(3, (uint8_t*)&in_msg->application_parameter[0], in_msg->key_handle, U2F_FIDO_AUTHENTICATE, &existing)){
+                        printf("[U2F FIDO] user presence not enforced (it should be)\n");                        
 			error = FIDO_REQUIRE_TEST_USER_PRESENCE;
+			goto err;
+		}
+		if(existing == false){
+                        printf("[U2F FIDO] key handle does not exist\n");
+			error = FIDO_INVALID_KEY_HANDLE;
 			goto err;
 		}
 	}
