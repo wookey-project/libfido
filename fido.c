@@ -533,7 +533,7 @@ static int u2f_fido_register(uint8_t u2f_param __attribute__((unused)), const ui
 
 	/* Sign 0x00 | application_parameter | challenge_parameter | key_handle | pub_key */
 	struct ec_sign_context sig_ctx;
-        if(ec_sign_init(&sig_ctx, &attestation_key_pair, ECDSA, SHA256)){
+        if(ec_sign_init(&sig_ctx, &attestation_key_pair, ECDSA, SHA256, NULL, 0)){
 		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
@@ -757,7 +757,7 @@ static int u2f_fido_authenticate(uint8_t u2f_param, const uint8_t * msg, uint16_
 	/* Sign */
 	struct ec_sign_context sig_ctx;
 
-        if(ec_sign_init(&sig_ctx, &key_pair, ECDSA, SHA256)){
+        if(ec_sign_init(&sig_ctx, &key_pair, ECDSA, SHA256, NULL, 0)){
 		error = FIDO_INVALID_KEY_HANDLE;
                 goto err;
         }
